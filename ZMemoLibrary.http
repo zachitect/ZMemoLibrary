@@ -1,0 +1,14 @@
+@ZMemoLibrary_HostAddress = http://localhost:5127
+
+GET {{ZMemoLibrary_HostAddress}}/api/library
+Accept: application/json
+
+###
+
+GET {{ZMemoLibrary_HostAddress}}/api/knowledge
+Accept: application/json
+
+###
+
+POST {{ZMemoLibrary_HostAddress}}/api/rescan
+Accept: application/json

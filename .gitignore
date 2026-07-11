@@ -1,0 +1,64 @@
+# .NET build output
+bin/
+obj/
+out/
+publish/
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# JetBrains IDEs
+.idea/
+*.sln.iml
+
+# Test and coverage output
+TestResults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# NuGet packages and generated package files
+*.nupkg
+*.snupkg
+packages/
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local publish profiles and certificates
+Properties/PublishProfiles/
+*.pubxml.user
+*.pfx
+*.p12
+*.cer
+*.key
+
+# Local knowledge content must not be published with the application source
+KnowledgeFiles/
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
