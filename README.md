@@ -202,7 +202,3 @@ ZMemoLibrary intentionally does not include:
 - multiple knowledge roots;
 - authentication or user accounts;
 - deployment configuration.
-
-## License
-
-No licence has been selected yet. Add a `LICENSE` file before treating the repository as open source or inviting external reuse.
