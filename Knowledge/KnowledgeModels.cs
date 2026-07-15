@@ -30,6 +30,7 @@ public sealed class KnowledgeVersion
         Keywords = keywords;
         Connections = connections;
         Body = body;
+        SourcePaths = [FullPath];
     }
 
     public Guid SeriesId { get; }
@@ -46,6 +47,7 @@ public sealed class KnowledgeVersion
     public List<string> Keywords { get; }
     public List<KnowledgeConnection> Connections { get; }
     public string Body { get; }
+    public List<string> SourcePaths { get; set; }
     public bool IsCurrent { get; set; }
 }
 
@@ -54,6 +56,8 @@ public sealed record KnowledgeSeries(Guid Id, KnowledgeVersion CurrentVersion, L
 public sealed record AmbiguousKnowledgeSeries(Guid Id, DateOnly LatestDate, List<KnowledgeVersion> Candidates);
 public sealed record KnowledgeScanIssue(string Path, string Message);
 public sealed record DownloadedFile(string FileName, byte[] Content);
+public sealed record DeleteKnowledgeRequest(List<string>? VersionKeys);
+public sealed record KnowledgeFileOperationResult(string FileName, string? VersionKey, string Outcome, bool Succeeded, string Message);
 public sealed record LibraryStatusResponse(string RootPath, bool IsAvailable, DateTimeOffset ScannedAt, int CurrentSeriesCount, int AmbiguousSeriesCount, int VersionCount, IReadOnlyList<KnowledgeScanIssue> Issues);
 public sealed record KnowledgeListItemResponse(Guid Id, string? VersionKey, string Title, DateOnly Updated, string Summary, int VersionCount, IReadOnlyList<Guid> ConnectedIds, bool IsAmbiguous, string? Warning);
 public sealed record KnowledgeVersionResponse(string VersionKey, Guid SeriesId, string Title, DateOnly Created, DateOnly Updated, string Summary, string FileName, bool IsCurrent);

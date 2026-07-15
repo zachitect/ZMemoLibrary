@@ -21,15 +21,33 @@
     selectionCount: document.querySelector("#selectionCount"),
     clearSelection: document.querySelector("#clearSelection"),
     downloadSelected: document.querySelector("#downloadSelected"),
+    deleteSelected: document.querySelector("#deleteSelected"),
+    uploadMarkdown: document.querySelector("#uploadMarkdown"),
+    uploadInput: document.querySelector("#uploadInput"),
+    catalogueSection: document.querySelector(".catalogue-section"),
+    dropOverlay: document.querySelector("#dropOverlay"),
+    deleteDialog: document.querySelector("#deleteDialog"),
+    deleteMessage: document.querySelector("#deleteMessage"),
+    confirmDelete: document.querySelector("#confirmDelete"),
+    cancelDelete: document.querySelector("#cancelDelete"),
+    operationResultsDialog: document.querySelector("#operationResultsDialog"),
+    operationResultsTitle: document.querySelector("#operationResultsTitle"),
+    operationResults: document.querySelector("#operationResults"),
+    closeOperationResults: document.querySelector("#closeOperationResults"),
     viewer: document.querySelector("#viewer"),
     viewerStatus: document.querySelector("#viewerStatus"),
     viewerTitle: document.querySelector("#viewerTitle"),
     viewerMeta: document.querySelector("#viewerMeta"),
     viewerBody: document.querySelector("#viewerBody"),
-    closeViewer: document.querySelector("#closeViewer")
+    copyViewerContent: document.querySelector("#copyViewerContent"),
+    downloadViewerContent: document.querySelector("#downloadViewerContent"),
+    closeViewer: document.querySelector("#closeViewer"),
+    promptLinks: document.querySelectorAll("[data-prompt-key]")
   };
 
   let searchTimer = null;
+  let viewerContent = "";
+  let viewerDownloadUrl = "";
 
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -47,6 +65,10 @@
 
   async function request(url, options) {
     const response = await fetch(url, options);
+    if (response.status === 401) {
+        window.location.assign("/access");
+        throw new Error("Access expired. Redirecting to unlock page...");
+    }
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`;
       try {
@@ -94,9 +116,26 @@
     if (!status.isAvailable) left.className = "error";
 
     const right = document.createElement("span");
+    right.className = "root-path";
     right.textContent = status.rootPath;
-    right.title = `Scanned ${new Date(status.scannedAt).toLocaleString()}`;
+    right.title = `Knowledge source directory · Scanned ${new Date(status.scannedAt).toLocaleString()}`;
     elements.status.append(left, right);
+  }
+
+  async function viewPrompt(promptKey, title) {
+    try {
+      const response = await request(`/api/prompts/${promptKey}`);
+      const markdown = await response.text();
+      viewerContent = markdown;
+      viewerDownloadUrl = `/api/prompts/${promptKey}/download`;
+      elements.viewerStatus.textContent = "Embedded LLM prompt";
+      elements.viewerTitle.textContent = title;
+      elements.viewerMeta.textContent = "Reference prompt included with ZMemoLibrary";
+      elements.viewerBody.innerHTML = renderMarkdown(markdown);
+      elements.viewer.showModal();
+    } catch (error) {
+      alert(error.message);
+    }
   }
 
   function renderIssues(issues) {
@@ -403,6 +442,10 @@
     try {
       const response = await request(`/api/versions/${versionKey}`);
       const version = await response.json();
+      const downloadUrl = `/api/versions/${versionKey}/download`;
+      const contentResponse = await request(downloadUrl);
+      viewerContent = await contentResponse.text();
+      viewerDownloadUrl = downloadUrl;
       elements.viewerStatus.textContent = `${version.isCurrent ? "Current version" : "Historical version"} · Updated ${version.updated}`;
       elements.viewerTitle.textContent = version.title;
       elements.viewerMeta.textContent = `${version.seriesId} · Created ${version.created}`;
@@ -411,6 +454,112 @@
     } catch (error) {
       alert(error.message);
     }
+  }
+
+  async function copyViewerContent() {
+    if (!viewerContent) return;
+
+    try {
+      await navigator.clipboard.writeText(viewerContent);
+      const originalText = elements.copyViewerContent.textContent;
+      elements.copyViewerContent.textContent = "Copied";
+      setTimeout(() => elements.copyViewerContent.textContent = originalText, 1200);
+    } catch (error) {
+      alert(`Could not copy content: ${error.message}`);
+    }
+  }
+
+  function downloadViewerContent() {
+    if (!viewerDownloadUrl) return;
+    window.location.assign(viewerDownloadUrl);
+  }
+
+  async function uploadFiles(files) {
+    const markdownFiles = [...files].filter(file => file.name.toLowerCase().endsWith(".md"));
+    const rejected = [...files]
+      .filter(file => !file.name.toLowerCase().endsWith(".md"))
+      .map(file => ({ fileName: file.name, outcome: "Invalid", succeeded: false, message: "Only .md files are accepted." }));
+
+    if (markdownFiles.length === 0) {
+      if (rejected.length > 0) showOperationResults("Upload Results", rejected);
+      return;
+    }
+
+    elements.uploadMarkdown.disabled = true;
+    const formData = new FormData();
+    for (const file of markdownFiles) formData.append("files", file, file.name);
+
+    try {
+      const response = await request("/api/library/upload", { method: "POST", body: formData });
+      const results = rejected.concat(await response.json());
+      showOperationResults("Upload Results", results);
+      if (results.some(result => result.succeeded)) {
+        state.histories.clear();
+        state.expanded.clear();
+        await load();
+      }
+    } catch (error) {
+      showOperationResults("Upload Results", [{ fileName: "Upload", outcome: "Failed", succeeded: false, message: error.message }]);
+    } finally {
+      elements.uploadMarkdown.disabled = false;
+      elements.uploadInput.value = "";
+    }
+  }
+
+  function showOperationResults(title, results) {
+    elements.operationResultsTitle.textContent = title;
+    elements.operationResults.innerHTML = "";
+    for (const result of results) {
+      const item = document.createElement("li");
+      item.className = "result-item";
+      const outcome = document.createElement("div");
+      outcome.className = `result-outcome ${result.succeeded ? "" : "error"}`;
+      outcome.textContent = `${result.fileName}: ${result.outcome}`;
+      const message = document.createElement("div");
+      message.className = "result-message";
+      message.textContent = result.message;
+      item.append(outcome, message);
+      elements.operationResults.append(item);
+    }
+    elements.operationResultsDialog.showModal();
+  }
+
+  function openDeleteConfirmation() {
+    if (state.selected.size === 0) return;
+    elements.deleteMessage.textContent = `Delete ${state.selected.size} selected knowledge series? This deletes every current and historical version in each selected series. All physical files will be moved to the server's Deleted folder for manual inspection and hidden from ZMemoLibrary. Individual historical versions cannot be deleted separately.`;
+    elements.deleteDialog.showModal();
+  }
+
+  async function deleteSelected() {
+    const versionKeys = [...state.selected.keys()];
+    if (versionKeys.length === 0) return;
+
+    elements.confirmDelete.disabled = true;
+    try {
+      const response = await request("/api/library/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionKeys })
+      });
+      const results = await response.json();
+      for (const result of results) {
+        if (result.succeeded && result.versionKey) state.selected.delete(result.versionKey);
+      }
+      elements.deleteDialog.close();
+      showOperationResults("Delete Results", results);
+      state.histories.clear();
+      state.expanded.clear();
+      await load();
+    } catch (error) {
+      elements.deleteDialog.close();
+      showOperationResults("Delete Results", [{ fileName: "Delete", outcome: "Failed", succeeded: false, message: error.message }]);
+    } finally {
+      elements.confirmDelete.disabled = false;
+    }
+  }
+
+  function isFileDrag(event) {
+    return [...(event.dataTransfer?.types || [])].includes("Files");
   }
 
   function copySelected() {
@@ -466,6 +615,7 @@
       ? "0 selected · Ctrl+C copies displayed summaries"
       : `${total} selected · ${visibleSelected} currently visible · Ctrl+C copies displayed summaries`;
     elements.clearSelection.disabled = total === 0;
+    elements.deleteSelected.disabled = total === 0;
     elements.downloadSelected.disabled = total === 0;
   }
 
@@ -507,7 +657,37 @@
     renderList();
   });
   elements.downloadSelected.addEventListener("click", downloadSelected);
+  elements.deleteSelected.addEventListener("click", openDeleteConfirmation);
+  elements.confirmDelete.addEventListener("click", deleteSelected);
+  elements.cancelDelete.addEventListener("click", () => elements.deleteDialog.close());
+  elements.uploadMarkdown.addEventListener("click", () => elements.uploadInput.click());
+  elements.uploadInput.addEventListener("change", () => uploadFiles(elements.uploadInput.files));
+  elements.closeOperationResults.addEventListener("click", () => elements.operationResultsDialog.close());
+  document.addEventListener("dragover", event => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    elements.dropOverlay.hidden = false;
+  });
+  document.addEventListener("dragleave", event => {
+    if (event.relatedTarget) return;
+    elements.dropOverlay.hidden = true;
+  });
+  document.addEventListener("drop", event => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    elements.dropOverlay.hidden = true;
+    uploadFiles(event.dataTransfer.files);
+  });
+  elements.copyViewerContent.addEventListener("click", copyViewerContent);
+  elements.downloadViewerContent.addEventListener("click", downloadViewerContent);
+  for (const promptLink of elements.promptLinks) {
+    promptLink.addEventListener("click", () => viewPrompt(promptLink.dataset.promptKey, promptLink.dataset.promptTitle));
+  }
   elements.closeViewer.addEventListener("click", () => elements.viewer.close());
+  elements.viewer.addEventListener("close", () => {
+    viewerContent = "";
+    viewerDownloadUrl = "";
+  });
 
   document.addEventListener("keydown", event => {
     const command = event.ctrlKey || event.metaKey;

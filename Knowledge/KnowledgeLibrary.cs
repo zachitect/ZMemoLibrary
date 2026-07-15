@@ -2,23 +2,21 @@ using System.Security.Cryptography;
 
 public sealed class KnowledgeLibrary
 {
-    private readonly IConfiguration _configuration;
+    private readonly SettingsStore _settings;
     private readonly ILogger<KnowledgeLibrary> _logger;
     private readonly object _lock = new();
+    private readonly object _mutationLock = new();
     private LibrarySnapshot _snapshot = LibrarySnapshot.Empty;
 
-    public KnowledgeLibrary(IConfiguration configuration, ILogger<KnowledgeLibrary> logger)
+    public KnowledgeLibrary(SettingsStore settings, ILogger<KnowledgeLibrary> logger)
     {
-        _configuration = configuration;
+        _settings = settings;
         _logger = logger;
     }
 
     public void Rescan()
     {
-        var configuredRoot = _configuration["KnowledgeLibrary:RootPath"];
-        var rootPath = string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.GetFullPath("KnowledgeFiles")
-            : Path.GetFullPath(configuredRoot);
+        var rootPath = Path.GetFullPath(_settings.KnowledgeLibraryDirectory);
 
         var scannedAt = DateTimeOffset.UtcNow;
         if (!Directory.Exists(rootPath))
@@ -62,6 +60,7 @@ public sealed class KnowledgeLibrary
                     .ThenBy(version => version.RelativePath, StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 var retained = copies[0];
+                retained.SourcePaths = copies.Select(copy => copy.FullPath).ToList();
                 distinctVersions.Add(retained);
                 versionsByKey[retained.VersionKey] = retained;
 
@@ -214,6 +213,141 @@ public sealed class KnowledgeLibrary
         return version == null ? null : ReadAndVerify(version);
     }
 
+    public KnowledgeFileOperationResult ImportFile(string uploadedFileName, byte[] content)
+    {
+        var fileName = Path.GetFileName(uploadedFileName);
+        if (!string.Equals(fileName, uploadedFileName, StringComparison.Ordinal) || !string.Equals(Path.GetExtension(fileName), ".md", StringComparison.OrdinalIgnoreCase))
+            return new KnowledgeFileOperationResult(uploadedFileName, null, "Invalid", false, "Only plain .md filenames are accepted.");
+
+        lock (_mutationLock)
+        {
+            var snapshot = GetSnapshot();
+            if (!snapshot.IsAvailable)
+                return new KnowledgeFileOperationResult(fileName, null, "Failed", false, "The knowledge library is unavailable.");
+
+            var versionKey = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+            if (snapshot.VersionsByKey.ContainsKey(versionKey))
+                return new KnowledgeFileOperationResult(fileName, versionKey, "Duplicate", false, "This exact knowledge version already exists.");
+
+            var destinationPath = Path.GetFullPath(Path.Combine(snapshot.RootPath, fileName));
+            if (!IsPathInsideRoot(destinationPath, snapshot.RootPath) || string.Equals(Path.GetFileName(destinationPath), "Deleted", StringComparison.OrdinalIgnoreCase))
+                return new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, "The upload filename is not allowed.");
+
+            if (File.Exists(destinationPath))
+                return new KnowledgeFileOperationResult(fileName, versionKey, "Filename conflict", false, "A different file already uses this filename. Rename the upload and try again.");
+
+            var temporaryPath = Path.Combine(snapshot.RootPath, $".zmemolibrary-upload-{Guid.NewGuid():N}.tmp");
+            try
+            {
+                File.WriteAllBytes(temporaryPath, content);
+                var parsed = KnowledgeFileParser.Parse(temporaryPath, snapshot.RootPath);
+                var existingSeries = snapshot.Series.Any(series => series.Id == parsed.SeriesId) || snapshot.AmbiguousSeries.Any(series => series.Id == parsed.SeriesId);
+                File.Move(temporaryPath, destinationPath);
+                return new KnowledgeFileOperationResult(fileName, parsed.VersionKey, existingSeries ? "New version" : "New knowledge", true, existingSeries ? "Added a new version to an existing knowledge series." : "Added a new knowledge series.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                return new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, ex.Message);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    public IReadOnlyList<KnowledgeFileOperationResult> DeleteSeries(IReadOnlyList<string> versionKeys)
+    {
+        lock (_mutationLock)
+        {
+            var snapshot = GetSnapshot();
+            var results = new List<KnowledgeFileOperationResult>();
+            foreach (var versionKey in versionKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var series = snapshot.Series.FirstOrDefault(item =>
+                    string.Equals(item.CurrentVersion.VersionKey, versionKey, StringComparison.OrdinalIgnoreCase));
+                if (series == null)
+                {
+                    results.Add(new KnowledgeFileOperationResult(versionKey, versionKey, "Failed", false, "The selected current knowledge series is no longer available. Rescan and try again."));
+                    continue;
+                }
+
+                var versions = new List<KnowledgeVersion> { series.CurrentVersion };
+                versions.AddRange(series.HistoricalVersions);
+                var moves = new List<(string SourcePath, string DestinationPath)>();
+
+                try
+                {
+                    var archiveRoot = Path.GetFullPath(Path.Combine(snapshot.RootPath, "Deleted"));
+                    foreach (var version in versions)
+                    {
+                        foreach (var physicalPath in version.SourcePaths)
+                        {
+                            var sourcePath = Path.GetFullPath(physicalPath);
+                            VerifyFile(sourcePath, version.VersionKey, Path.GetRelativePath(snapshot.RootPath, sourcePath));
+                            if (!IsPathInsideRoot(sourcePath, snapshot.RootPath))
+                                throw new IOException("A source file is outside the configured knowledge root.");
+
+                            var relativePath = Path.GetRelativePath(snapshot.RootPath, sourcePath);
+                            var destinationPath = Path.GetFullPath(Path.Combine(archiveRoot, relativePath));
+                            if (!IsPathInsideRoot(destinationPath, archiveRoot))
+                                throw new IOException("An archive destination is invalid.");
+                            if (!File.Exists(sourcePath))
+                                throw new IOException($"A source file is missing: {relativePath}.");
+                            if (File.Exists(destinationPath))
+                                throw new IOException($"An archived file already exists: Deleted/{relativePath}.");
+
+                            moves.Add((sourcePath, destinationPath));
+                        }
+                    }
+
+                    var completedMoves = new List<(string SourcePath, string DestinationPath)>();
+                    try
+                    {
+                        foreach (var move in moves)
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(move.DestinationPath)!);
+                            File.Move(move.SourcePath, move.DestinationPath);
+                            completedMoves.Add(move);
+                        }
+                    }
+                    catch
+                    {
+                        foreach (var move in completedMoves.AsEnumerable().Reverse())
+                        {
+                            if (File.Exists(move.DestinationPath) && !File.Exists(move.SourcePath))
+                            {
+                                Directory.CreateDirectory(Path.GetDirectoryName(move.SourcePath)!);
+                                File.Move(move.DestinationPath, move.SourcePath);
+                            }
+                        }
+                        throw;
+                    }
+
+                    results.Add(new KnowledgeFileOperationResult(
+                        series.CurrentVersion.Title,
+                        series.CurrentVersion.VersionKey,
+                        "Deleted",
+                        true,
+                        $"Moved all {moves.Count} physical file{(moves.Count == 1 ? "" : "s")} in this knowledge series to Deleted/."));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    results.Add(new KnowledgeFileOperationResult(series.CurrentVersion.Title, series.CurrentVersion.VersionKey, "Failed", false, ex.Message));
+                }
+            }
+
+            return results;
+        }
+    }
+
+    private static bool IsPathInsideRoot(string path, string rootPath)
+    {
+        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return path.StartsWith(root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
     private static List<string> EnumerateMarkdownFiles(string rootPath, List<KnowledgeScanIssue> issues)
     {
         var files = new List<string>();
@@ -227,7 +361,15 @@ public sealed class KnowledgeLibrary
             {
                 files.AddRange(Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly));
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
+                {
+                    if (string.Equals(directory, rootPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) &&
+                        string.Equals(Path.GetFileName(childDirectory), "Deleted", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     pendingDirectories.Push(childDirectory);
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -250,11 +392,21 @@ public sealed class KnowledgeLibrary
     private static DownloadedFile ReadAndVerify(KnowledgeVersion version)
     {
         var content = File.ReadAllBytes(version.FullPath);
-        var currentKey = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
-        if (!string.Equals(currentKey, version.VersionKey, StringComparison.OrdinalIgnoreCase))
-            throw new IOException($"The source file changed after the last scan: {version.RelativePath}. Rescan and try again.");
-
+        VerifyContent(content, version.VersionKey, version.RelativePath);
         return new DownloadedFile(version.FileName, content);
+    }
+
+    private static void VerifyFile(string path, string expectedVersionKey, string displayPath)
+    {
+        var content = File.ReadAllBytes(path);
+        VerifyContent(content, expectedVersionKey, displayPath);
+    }
+
+    private static void VerifyContent(byte[] content, string expectedVersionKey, string displayPath)
+    {
+        var currentKey = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+        if (!string.Equals(currentKey, expectedVersionKey, StringComparison.OrdinalIgnoreCase))
+            throw new IOException($"The source file changed after the last scan: {displayPath}. Rescan and try again.");
     }
 
     private static List<string> SplitSearchTerms(string? query)

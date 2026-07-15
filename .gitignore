@@ -56,9 +56,10 @@ Properties/PublishProfiles/
 # Local knowledge content must not be published with the application source
 KnowledgeFiles/
 
+# Local access credentials and session state
+AppData/
+
 # Local environment overrides
 .env
 .env.*
 !.env.example
-appsettings.Local.json
-appsettings.*.Local.json
