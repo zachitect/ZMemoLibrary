@@ -1,8 +1,9 @@
 BEGIN_KNOWLEDGE_HEADER
+PROJECT: ZMemoLibrary
 ID: aeae608c-a601-44ab-9046-8edc6b3d0994
 TITLE: LLM Instruction - Convert Raw File To Knowledge File
 CREATED: 2026-06-21
-UPDATED: 2026-06-21
+UPDATED: 2026-08-06
 SUMMARY: Use this instruction when converting raw notes, LLM handovers, session summaries, or loose technical records into consistent knowledge-library files. It uses a simple plain-text header instead of YAML so future LLMs can follow the format reliably.
 KEYWORDS: LLM knowledge library; raw conversion; plain text header; metadata; GUID; connections; content date
 CONNECTIONS: none | No known related knowledge file.
@@ -13,6 +14,26 @@ END_KNOWLEDGE_HEADER
 You are converting raw knowledge content into one new knowledge-library Markdown file.
 
 Do not modify the original file. Generate a new file.
+
+## Project Ownership
+
+Every knowledge file belongs to exactly one human-nominated project.
+
+The project may be supplied with the task as:
+
+```text
+PROJECT: <project name>
+```
+
+Rules:
+
+- Copy a supplied project name exactly.
+- Do not infer the project from content, filenames, paths, repositories, namespaces, titles, keywords, connected documents, or mentioned products.
+- Do not correct, normalise, rename, abbreviate, expand, merge, or subdivide a supplied project name.
+- Do not assign multiple projects.
+- If no project is supplied, use exactly `PROJECT: Unassigned`.
+- `Unassigned` means no human has nominated the project.
+- Project assignment is organisational metadata and does not determine connections.
 
 ## Filename Rules
 
@@ -39,6 +60,7 @@ Use this exact plain-text header at the very top of every knowledge file:
 
 ```text
 BEGIN_KNOWLEDGE_HEADER
+PROJECT: <human-nominated project name or Unassigned>
 ID: <guid>
 TITLE: <short human-readable title>
 CREATED: <YYYY-MM-DD>
@@ -56,13 +78,17 @@ This is not YAML. Do not use YAML indentation. Do not use frontmatter `---` line
 - The first line of the file must be exactly `BEGIN_KNOWLEDGE_HEADER`.
 - The header must end with exactly `END_KNOWLEDGE_HEADER`.
 - Use exactly these fields in exactly this order:
-  1. `ID:`
-  2. `TITLE:`
-  3. `CREATED:`
-  4. `UPDATED:`
-  5. `SUMMARY:`
-  6. `KEYWORDS:`
-  7. `CONNECTIONS:`
+  1. `PROJECT:`
+  2. `ID:`
+  3. `TITLE:`
+  4. `CREATED:`
+  5. `UPDATED:`
+  6. `SUMMARY:`
+  7. `KEYWORDS:`
+  8. `CONNECTIONS:`
+- `PROJECT` must contain exactly one project name.
+- Use the supplied project exactly, or `Unassigned` when none is supplied.
+- Do not infer `PROJECT`.
 - Do not add extra header fields.
 - Do not remove header fields.
 - Keep each header field on one physical line.
@@ -124,7 +150,7 @@ Create a connection only when the relationship is clear and useful for future re
 
 Good connection reasons include:
 
-- same specific project;
+- direct dependency or continuation within the same project;
 - same VPS, server, repo, codebase, website, domain, workflow, or environment;
 - direct continuation of the same task;
 - one file depends on, supersedes, or explains another;
@@ -138,6 +164,7 @@ Bad connection reasons include:
 - both files are about servers in general;
 - both files are old;
 - both files are in the same folder but have no useful content relationship.
+- both files belong to the same project but have no direct useful relationship.
 
 If only one file is provided, use `CONNECTIONS: none | No known related knowledge file.`.
 
@@ -159,6 +186,11 @@ If only one file is provided, use `CONNECTIONS: none | No known related knowledg
 Before returning, verify the generated file itself:
 
 - Line 1 is exactly `BEGIN_KNOWLEDGE_HEADER`.
+- `PROJECT` is the first header field.
+- A supplied project was copied exactly.
+- If no project was supplied, the value is exactly `Unassigned`.
+- The project was not inferred from content.
+- There is exactly one `PROJECT:` line.
 - The header fields are present in the required order.
 - Every header field is on one line.
 - There is exactly one `CONNECTIONS:` line.

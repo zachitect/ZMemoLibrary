@@ -6,6 +6,7 @@ public sealed class KnowledgeVersion
         string fullPath,
         string relativePath,
         string fileName,
+        string project,
         string title,
         DateOnly created,
         DateOnly updated,
@@ -21,6 +22,7 @@ public sealed class KnowledgeVersion
         FullPath = fullPath;
         RelativePath = relativePath;
         FileName = fileName;
+        Project = project;
         Title = title;
         Created = created;
         Updated = updated;
@@ -38,6 +40,7 @@ public sealed class KnowledgeVersion
     public string FullPath { get; }
     public string RelativePath { get; }
     public string FileName { get; }
+    public string Project { get; internal set; }
     public string Title { get; }
     public DateOnly Created { get; }
     public DateOnly Updated { get; }
@@ -59,7 +62,7 @@ public sealed record DownloadedFile(string FileName, byte[] Content);
 public sealed record DeleteKnowledgeRequest(List<string>? VersionKeys);
 public sealed record KnowledgeFileOperationResult(string FileName, string? VersionKey, string Outcome, bool Succeeded, string Message);
 public sealed record LibraryStatusResponse(string RootPath, bool IsAvailable, DateTimeOffset ScannedAt, int CurrentSeriesCount, int AmbiguousSeriesCount, int VersionCount, IReadOnlyList<KnowledgeScanIssue> Issues);
-public sealed record KnowledgeListItemResponse(Guid Id, string? VersionKey, string Title, DateOnly Updated, string Summary, int VersionCount, IReadOnlyList<Guid> ConnectedIds, bool IsAmbiguous, string? Warning);
+public sealed record KnowledgeListItemResponse(Guid Id, string? VersionKey, string Project, string Title, DateOnly Updated, string Summary, int VersionCount, IReadOnlyList<Guid> ConnectedIds, bool IsAmbiguous, string? Warning);
 public sealed record KnowledgeVersionResponse(string VersionKey, Guid SeriesId, string Title, DateOnly Created, DateOnly Updated, string Summary, string FileName, bool IsCurrent);
 public sealed record VersionDetailResponse(string VersionKey, Guid SeriesId, string Title, DateOnly Created, DateOnly Updated, string Summary, IReadOnlyList<string> Keywords, IReadOnlyList<KnowledgeConnection> Connections, string Body, bool IsCurrent);
 public sealed record LibrarySnapshot(

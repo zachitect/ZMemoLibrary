@@ -4,7 +4,9 @@
     selected: new Map(),
     expanded: new Set(),
     histories: new Map(),
+    collapsedProjects: new Set(),
     lastSelectedIndex: null,
+    activeIndex: null,
     query: ""
   };
 
@@ -13,7 +15,15 @@
     clearSearch: document.querySelector("#clearSearch"),
     rescan: document.querySelector("#rescan"),
     themeToggle: document.querySelector("#themeToggle"),
+    mobileMore: document.querySelector("#mobileMore"),
+    mobileMenu: document.querySelector("#mobileMenu"),
+    mobileRescan: document.querySelector("#mobileRescan"),
+    mobileUpload: document.querySelector("#mobileUpload"),
     status: document.querySelector("#status"),
+    indexCount: document.querySelector("#indexCount"),
+    indexList: document.querySelector("#indexList"),
+    expandAllProjects: document.querySelector("#expandAllProjects"),
+    collapseAllProjects: document.querySelector("#collapseAllProjects"),
     list: document.querySelector("#list"),
     issues: document.querySelector("#issues"),
     issuesSummary: document.querySelector("#issuesSummary"),
@@ -42,12 +52,14 @@
     copyViewerContent: document.querySelector("#copyViewerContent"),
     downloadViewerContent: document.querySelector("#downloadViewerContent"),
     closeViewer: document.querySelector("#closeViewer"),
-    promptLinks: document.querySelectorAll("[data-prompt-key]")
+    promptLinks: document.querySelectorAll("[data-prompt-key]"),
+    selectionBar: document.querySelector(".selection-bar")
   };
 
   let searchTimer = null;
   let viewerContent = "";
   let viewerDownloadUrl = "";
+  let catalogueScrollFrame = null;
 
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -82,6 +94,8 @@
 
   async function load() {
     elements.status.textContent = "Loading knowledge catalogue...";
+    elements.indexCount.textContent = "…";
+    elements.indexList.innerHTML = '<div class="index-empty">Loading index...</div>';
     try {
       const [statusResponse, knowledgeResponse] = await Promise.all([
         request("/api/library"),
@@ -104,6 +118,7 @@
       text.textContent = error.message;
       elements.status.append(text);
       elements.list.innerHTML = '<div class="empty">The catalogue could not be loaded.</div>';
+      renderIndexEmpty("Index unavailable");
     }
   }
 
@@ -152,6 +167,10 @@
 
   function renderList() {
     elements.list.innerHTML = "";
+    const connectedIds = getConnectedIds();
+    const projectGroups = getProjectGroups();
+    renderIndex(projectGroups, connectedIds);
+
     if (state.items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "knowledge-row empty";
@@ -161,73 +180,250 @@
       return;
     }
 
-    const connectedIds = new Set(
+    projectGroups.forEach((group, groupIndex) => {
+      const section = document.createElement("section");
+      section.className = "project-group";
+      const contentId = `catalogue-project-${groupIndex}`;
+      section.append(createProjectHeader(group, contentId, "project-header"));
+
+      const content = document.createElement("div");
+      content.id = contentId;
+      content.className = "project-items";
+      content.hidden = state.collapsedProjects.has(group.project);
+      for (const entry of group.entries) {
+        content.append(createKnowledgeRow(entry.item, entry.index, connectedIds));
+        if (state.expanded.has(entry.item.id))
+          content.append(renderHistory(entry.item.id));
+      }
+      section.append(content);
+      elements.list.append(section);
+    });
+
+    if (state.activeIndex === null || state.activeIndex >= state.items.length)
+      state.activeIndex = 0;
+    updateActiveIndex(state.activeIndex, false);
+    updateSelectionBar();
+  }
+
+  function getProjectGroups() {
+    const groups = new Map();
+    state.items.forEach((item, index) => {
+      if (!groups.has(item.project))
+        groups.set(item.project, []);
+      groups.get(item.project).push({ item, index });
+    });
+
+    return [...groups.entries()]
+      .map(([project, entries]) => ({ project, entries }))
+      .sort((left, right) => {
+        if (left.project === "Unassigned") return right.project === "Unassigned" ? 0 : -1;
+        if (right.project === "Unassigned") return 1;
+        return left.project.localeCompare(right.project, undefined, { sensitivity: "base" });
+      });
+  }
+
+  function createProjectHeader(group, contentId, className) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.setAttribute("aria-controls", contentId);
+    const isExpanded = !state.collapsedProjects.has(group.project);
+    button.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+    button.title = group.project;
+    button.dataset.project = group.project;
+
+    const toggle = document.createElement("span");
+    toggle.className = "project-toggle";
+    toggle.textContent = isExpanded ? "▾" : "▸";
+    const name = document.createElement("span");
+    name.className = "project-name";
+    name.textContent = group.project;
+    const count = document.createElement("span");
+    count.className = "project-count";
+    count.textContent = group.entries.length;
+    button.append(toggle, name, count);
+    button.addEventListener("click", () => toggleProject(group.project, className));
+    return button;
+  }
+
+  function createKnowledgeRow(item, index, connectedIds) {
+    const row = document.createElement("article");
+    row.className = "knowledge-row";
+    row.dataset.id = item.id;
+    row.dataset.index = index;
+    row.tabIndex = -1;
+    if (item.isAmbiguous) row.classList.add("ambiguous");
+    if (connectedIds.has(item.id.toLowerCase())) row.classList.add("connected");
+    if (item.versionKey && state.selected.has(item.versionKey)) row.classList.add("selected");
+
+    const top = document.createElement("div");
+    top.className = "row-top";
+    const text = document.createElement("div");
+    const metadata = document.createElement("div");
+    metadata.className = "knowledge-meta";
+    const guid = document.createElement("div");
+    guid.className = "guid";
+    guid.textContent = item.id;
+    const updated = document.createElement("div");
+    updated.className = "updated";
+    updated.textContent = `Updated ${item.updated}`;
+    metadata.append(guid, updated);
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = item.title;
+    const summary = document.createElement("p");
+    summary.className = "summary";
+    summary.textContent = item.summary;
+    text.append(title, metadata, summary);
+    top.append(text);
+
+    if (item.versionCount > 1 || item.isAmbiguous) {
+      const versions = document.createElement("button");
+      versions.className = "versions-button";
+      versions.type = "button";
+      versions.textContent = `${item.versionCount} versions ${state.expanded.has(item.id) ? "▾" : "▸"}`;
+      versions.addEventListener("click", event => {
+        event.stopPropagation();
+        toggleHistory(item.id);
+      });
+      top.append(versions);
+    }
+
+    row.append(top);
+    if (item.warning) {
+      const warning = document.createElement("div");
+      warning.className = "updated warning";
+      warning.textContent = item.warning;
+      row.append(warning);
+    }
+
+    if (!item.isAmbiguous) {
+      row.addEventListener("click", event => selectRow(item, index, event));
+      row.addEventListener("dblclick", () => viewVersion(item.versionKey));
+    }
+    return row;
+  }
+
+  function getConnectedIds() {
+    return new Set(
       [...state.selected.values()]
         .flatMap(item => item.connectedIds || [])
         .map(id => id.toLowerCase())
     );
+  }
 
-    state.items.forEach((item, index) => {
-      const row = document.createElement("article");
-      row.className = "knowledge-row";
-      row.dataset.id = item.id;
-      row.tabIndex = -1;
-      if (item.isAmbiguous) row.classList.add("ambiguous");
-      if (connectedIds.has(item.id.toLowerCase())) row.classList.add("connected");
-      if (item.versionKey && state.selected.has(item.versionKey)) row.classList.add("selected");
+  function renderIndex(projectGroups, connectedIds) {
+    elements.indexList.innerHTML = "";
+    elements.indexCount.textContent = state.items.length;
+    if (state.items.length === 0) {
+      renderIndexEmpty(state.query ? "No matching entries" : "No knowledge entries");
+      state.activeIndex = null;
+      return;
+    }
 
-      const top = document.createElement("div");
-      top.className = "row-top";
-      const text = document.createElement("div");
-      const metadata = document.createElement("div");
-      metadata.className = "knowledge-meta";
-      const guid = document.createElement("div");
-      guid.className = "guid";
-      guid.textContent = item.id;
-      const updated = document.createElement("div");
-      updated.className = "updated";
-      updated.textContent = `Updated ${item.updated}`;
-      metadata.append(guid, updated);
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent = item.title;
-      const summary = document.createElement("p");
-      summary.className = "summary";
-      summary.textContent = item.summary;
-      text.append(title, metadata, summary);
-      top.append(text);
+    projectGroups.forEach((group, groupIndex) => {
+      const section = document.createElement("section");
+      section.className = "index-project";
+      const contentId = `index-project-${groupIndex}`;
+      section.append(createProjectHeader(group, contentId, "index-project-header"));
 
-      if (item.versionCount > 1 || item.isAmbiguous) {
-        const versions = document.createElement("button");
-        versions.className = "versions-button";
-        versions.type = "button";
-        versions.textContent = `${item.versionCount} versions ${state.expanded.has(item.id) ? "▾" : "▸"}`;
-        versions.addEventListener("click", event => {
-          event.stopPropagation();
-          toggleHistory(item.id);
-        });
-        top.append(versions);
+      const content = document.createElement("div");
+      content.id = contentId;
+      content.className = "index-project-items";
+      content.hidden = state.collapsedProjects.has(group.project);
+      for (const entry of group.entries) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "index-item";
+        button.dataset.index = entry.index;
+        button.title = entry.item.title;
+        if (entry.item.isAmbiguous) button.classList.add("ambiguous");
+        if (connectedIds.has(entry.item.id.toLowerCase())) button.classList.add("connected");
+        if (entry.item.versionKey && state.selected.has(entry.item.versionKey)) button.classList.add("selected");
+
+        const title = document.createElement("span");
+        title.className = "index-title";
+        title.textContent = entry.item.title;
+        const meta = document.createElement("span");
+        meta.className = "index-meta";
+        meta.textContent = `Updated ${entry.item.updated}`;
+        button.append(title, meta);
+        button.addEventListener("click", () => navigateToIndex(entry.index));
+        content.append(button);
       }
-
-      row.append(top);
-      if (item.warning) {
-        const warning = document.createElement("div");
-        warning.className = "updated warning";
-        warning.textContent = item.warning;
-        row.append(warning);
-      }
-
-      if (!item.isAmbiguous) {
-        row.addEventListener("click", event => selectRow(item, index, event));
-        row.addEventListener("dblclick", () => viewVersion(item.versionKey));
-      }
-      elements.list.append(row);
-
-      if (state.expanded.has(item.id))
-        elements.list.append(renderHistory(item.id));
+      section.append(content);
+      elements.indexList.append(section);
     });
+  }
 
-    updateSelectionBar();
+  function renderIndexEmpty(message) {
+    elements.indexCount.textContent = "0";
+    elements.indexList.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "index-empty";
+    empty.textContent = message;
+    elements.indexList.append(empty);
+  }
+
+  function toggleProject(project, className) {
+    if (state.collapsedProjects.has(project))
+      state.collapsedProjects.delete(project);
+    else
+      state.collapsedProjects.add(project);
+    renderList();
+
+    const headers = document.querySelectorAll(`.${className}`);
+    for (const header of headers) {
+      if (header.dataset.project === project) {
+        header.focus();
+        break;
+      }
+    }
+  }
+
+  function setAllVisibleProjectsCollapsed(isCollapsed) {
+    for (const group of getProjectGroups()) {
+      if (isCollapsed)
+        state.collapsedProjects.add(group.project);
+      else
+        state.collapsedProjects.delete(group.project);
+    }
+    renderList();
+  }
+
+  function navigateToIndex(index) {
+    const row = elements.list.querySelector(`.knowledge-row[data-index="${index}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: "start" });
+    row.focus({ preventScroll: true });
+    updateActiveIndex(index, true);
+  }
+
+  function updateActiveIndex(index, revealIndexItem) {
+    if (index === null || index < 0 || index >= state.items.length) return;
+    state.activeIndex = index;
+    for (const item of elements.indexList.querySelectorAll(".index-item"))
+      item.classList.toggle("viewport-active", Number(item.dataset.index) === index);
+
+    if (revealIndexItem) {
+      const activeItem = elements.indexList.querySelector(`.index-item[data-index="${index}"]`);
+      activeItem?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function updateActiveIndexFromScroll() {
+    catalogueScrollFrame = null;
+    const listTop = elements.list.getBoundingClientRect().top;
+    const rows = elements.list.querySelectorAll(".knowledge-row[data-index]");
+    let activeIndex = null;
+    for (const row of rows) {
+      if (row.getBoundingClientRect().bottom > listTop + 8) {
+        activeIndex = Number(row.dataset.index);
+        break;
+      }
+    }
+    if (activeIndex !== null)
+      updateActiveIndex(activeIndex, true);
   }
 
   function selectRow(item, index, event) {
@@ -608,16 +804,48 @@
     URL.revokeObjectURL(url);
   }
 
+  function setMobileMenuOpen(isOpen) {
+    elements.mobileMenu.hidden = !isOpen;
+    elements.mobileMore.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
   function updateSelectionBar() {
     const visibleSelected = state.items.filter(item => item.versionKey && state.selected.has(item.versionKey)).length;
     const total = state.selected.size;
     elements.selectionCount.textContent = total === 0
       ? "0 selected · Ctrl+C copies displayed summaries"
       : `${total} selected · ${visibleSelected} currently visible · Ctrl+C copies displayed summaries`;
+    elements.selectionBar.classList.toggle("has-selection", total > 0);
     elements.clearSelection.disabled = total === 0;
     elements.deleteSelected.disabled = total === 0;
     elements.downloadSelected.disabled = total === 0;
   }
+
+  elements.expandAllProjects.addEventListener("click", () => setAllVisibleProjectsCollapsed(false));
+  elements.collapseAllProjects.addEventListener("click", () => setAllVisibleProjectsCollapsed(true));
+
+  elements.indexList.addEventListener("keydown", event => {
+    const current = event.target.closest(".index-item");
+    if (!current) return;
+    const currentIndex = Number(current.dataset.index);
+    let nextIndex = null;
+    if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+    else if (event.key === "ArrowDown") nextIndex = Math.min(state.items.length - 1, currentIndex + 1);
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = state.items.length - 1;
+    else if (event.key === " ") {
+      event.preventDefault();
+      return;
+    } else return;
+
+    event.preventDefault();
+    elements.indexList.querySelector(`.index-item[data-index="${nextIndex}"]`)?.focus();
+  });
+
+  elements.list.addEventListener("scroll", () => {
+    if (catalogueScrollFrame !== null) return;
+    catalogueScrollFrame = requestAnimationFrame(updateActiveIndexFromScroll);
+  }, { passive: true });
 
   elements.search.addEventListener("input", () => {
     clearTimeout(searchTimer);
@@ -637,6 +865,21 @@
   elements.themeToggle.addEventListener("click", () => {
     setTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
   });
+
+  elements.mobileMore.addEventListener("click", event => {
+    event.stopPropagation();
+    setMobileMenuOpen(elements.mobileMenu.hidden);
+  });
+  elements.mobileMenu.addEventListener("click", event => event.stopPropagation());
+  elements.mobileRescan.addEventListener("click", () => {
+    setMobileMenuOpen(false);
+    elements.rescan.click();
+  });
+  elements.mobileUpload.addEventListener("click", () => {
+    setMobileMenuOpen(false);
+    elements.uploadMarkdown.click();
+  });
+  document.addEventListener("click", () => setMobileMenuOpen(false));
 
   elements.rescan.addEventListener("click", async () => {
     elements.rescan.disabled = true;
@@ -681,7 +924,10 @@
   elements.copyViewerContent.addEventListener("click", copyViewerContent);
   elements.downloadViewerContent.addEventListener("click", downloadViewerContent);
   for (const promptLink of elements.promptLinks) {
-    promptLink.addEventListener("click", () => viewPrompt(promptLink.dataset.promptKey, promptLink.dataset.promptTitle));
+    promptLink.addEventListener("click", () => {
+      setMobileMenuOpen(false);
+      viewPrompt(promptLink.dataset.promptKey, promptLink.dataset.promptTitle);
+    });
   }
   elements.closeViewer.addEventListener("click", () => elements.viewer.close());
   elements.viewer.addEventListener("close", () => {
@@ -690,6 +936,12 @@
   });
 
   document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !elements.mobileMenu.hidden) {
+      setMobileMenuOpen(false);
+      elements.mobileMore.focus();
+      return;
+    }
+
     const command = event.ctrlKey || event.metaKey;
     if (!command) return;
     const active = document.activeElement;

@@ -356,46 +356,81 @@ string BuildAccessDocument(string title, string description, string? error, stri
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{title}}</title>
   <style>
-    :root { color-scheme: dark; font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New", monospace; background: #0d1117; color: #e6edf3; }
+    :root {
+      color-scheme: dark;
+      font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New", monospace;
+      --page: #121821;
+      --surface: #1B2430;
+      --surface-subtle: #151D27;
+      --text: #F1F5F9;
+      --secondary: #A6B1C0;
+      --border: #39485B;
+      --border-strong: #52647A;
+      --primary: #5F8EE8;
+      --primary-hover: #78A2F0;
+      --error: #E26D67;
+      --error-fill: #382127;
+      --success: #63C187;
+      --success-fill: #193225;
+      background: var(--page);
+      color: var(--text);
+    }
     * { box-sizing: border-box; }
-    html { min-width: 0; min-height: 100%; background: #0d1117; }
+    html { min-width: 0; min-height: 100%; background: var(--page); }
     body {
-      min-width: 0;
-      min-height: 100vh;
-      min-height: 100dvh;
+      min-width: 0; min-height: 100vh; min-height: 100dvh;
       margin: 0;
       display: grid;
       place-items: center;
       padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
       overflow-x: hidden;
-      background: radial-gradient(circle at top, #172033 0, #0d1117 430px);
+      background: var(--page);
+      color: var(--text);
     }
-    main { width: min(440px, 100%); min-width: 0; padding: 28px; border: 1px solid #303946; border-radius: 9px; background: #151b23; box-shadow: 0 18px 48px rgba(0,0,0,.35); }
-    h1 { margin: 0 0 8px; color: #f0f6fc; font-size: 23px; line-height: 1.25; overflow-wrap: anywhere; }
-    p { margin: 0 0 22px; color: #9aa7b5; line-height: 1.5; overflow-wrap: anywhere; }
-    .error { padding: 10px 12px; border: 1px solid #c64a55; border-radius: 6px; color: #ff9ca5; background: #311b20; }
-    .success { padding: 10px 12px; border: 1px solid #2f9e65; border-radius: 6px; color: #8ee6b7; background: #142b20; }
+    main { width: min(480px, 100%); min-width: 0; padding: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.3); }
+    h1 { margin: 0 0 8px; color: var(--text); font-size: 23px; line-height: 1.25; letter-spacing: -.3px; overflow-wrap: anywhere; }
+    p { margin: 0 0 22px; color: var(--secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .error, .success { padding: 10px 12px; border-radius: 5px; }
+    .error { border: 1px solid var(--error); color: var(--error); background: var(--error-fill); }
+    .success { border: 1px solid var(--success); color: var(--success); background: var(--success-fill); }
     form { min-width: 0; display: grid; gap: 10px; }
-    fieldset { min-width: 0; display: grid; gap: 10px; margin: 5px 0; padding: 14px; border: 1px solid #303946; border-radius: 6px; }
-    legend { max-width: 100%; padding: 0 6px; color: #f0f6fc; font-weight: 700; overflow-wrap: anywhere; }
-    label { min-width: 0; margin-top: 4px; color: #c7d0da; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-    .hint { min-width: 0; color: #8795a5; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
-    input { width: 100%; min-width: 0; height: 44px; border: 1px solid #3b4655; border-radius: 6px; padding: 0 12px; background: #0d1117; color: #e6edf3; font: inherit; font-size: 16px; }
-    input:focus { outline: 2px solid #3b82c4; outline-offset: 1px; }
-    button { min-width: 0; min-height: 44px; margin-top: 10px; border: 1px solid #3f95c8; border-radius: 6px; padding: 8px 14px; background: #1f6f9f; color: #fff; font: inherit; font-weight: 700; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
-    button:hover { background: #2785ba; }
-    .back { display: inline-block; margin-top: 18px; color: #79c0ff; overflow-wrap: anywhere; }
-
+    fieldset { min-width: 0; display: grid; gap: 10px; margin: 5px 0; padding: 14px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-subtle); }
+    legend { max-width: 100%; padding: 0 6px; color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
+    label { min-width: 0; margin-top: 4px; color: var(--text); font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+    .hint { min-width: 0; color: var(--secondary); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+    input { width: 100%; min-width: 0; height: 44px; border: 1px solid var(--border-strong); border-radius: 5px; padding: 0 12px; background: var(--surface-subtle); color: var(--text); font: inherit; font-size: 16px; }
+    input:focus { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
+    button { min-width: 0; min-height: 44px; margin-top: 10px; border: 1px solid var(--primary); border-radius: 5px; padding: 8px 14px; background: var(--primary); color: #fff; font: inherit; font-weight: 700; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+    button:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
+    button:focus-visible, .back:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+    .back { display: inline-block; margin-top: 18px; color: var(--primary); overflow-wrap: anywhere; }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --page: #F4F7F9;
+        --surface: #FFFFFF;
+        --surface-subtle: #EEF1F4;
+        --text: #263244;
+        --secondary: #586477;
+        --border: #C7CED8;
+        --border-strong: #AAB5C3;
+        --primary: #2563EB;
+        --primary-hover: #1D4ED8;
+        --error: #A4261D;
+        --error-fill: #FDE7E5;
+        --success: #1F6B3A;
+        --success-fill: #E3F3E8;
+      }
+      main { box-shadow: 0 10px 30px rgba(38,50,68,.12); }
+    }
     @media (max-width: 480px) {
       body { place-items: start center; padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
-      main { padding: 20px 16px; border-radius: 7px; }
+      main { padding: 22px 16px; border-radius: 6px; }
       h1 { font-size: 21px; }
       fieldset { padding: 12px 10px; }
     }
-
-    @media (max-height: 650px) {
-      body { place-items: start center; }
-    }
+    @media (max-height: 650px) { body { place-items: start center; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
   </style>
 </head>
 <body>

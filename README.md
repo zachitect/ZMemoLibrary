@@ -12,6 +12,7 @@ The Markdown files remain the source of truth. The application scans them into a
 - Login attempt rate limiting.
 - Recursively scans a configured folder for `.md` knowledge files.
 - Parses a strict plain-text knowledge header followed by a Markdown body.
+- Groups knowledge documents by their required human-owned `PROJECT` value.
 - Groups physical versions by their internal GUID.
 - Resolves the current version using:
   - internal `UPDATED` date;
@@ -154,6 +155,7 @@ Every valid knowledge file must begin with this exact header structure:
 
 ```text
 BEGIN_KNOWLEDGE_HEADER
+PROJECT: Unassigned
 ID: 00000000-0000-0000-0000-000000000000
 TITLE: Short human-readable title
 CREATED: YYYY-MM-DD
@@ -175,6 +177,11 @@ CONNECTIONS: none | No known related knowledge file.
 
 Header requirements:
 
+- `PROJECT` is required and must be the first field.
+- Each file belongs to exactly one human-nominated project.
+- Use `PROJECT: Unassigned` only when no project has been nominated.
+- Project names are grouped case-insensitively; inconsistent casing produces a scan issue.
+- Connections may link documents within the same project or across different projects.
 - Fields must appear exactly once and in the displayed order.
 - Each field must remain on one physical line.
 - `ID` must be a valid GUID.
@@ -231,15 +238,17 @@ On first launch, create the shared passcode in the browser. Later launches show 
 2. Open the configured HTTP address; a new installation uses `http://localhost:9000`.
 3. Create the shared passcode on first launch, or enter the existing passcode.
 4. Open **Settings** and choose the knowledge library directory and HTTP port.
-5. Browse or search the current catalogue.
-6. Select entries with normal desktop selection controls.
-7. Press Ctrl/Command+C to copy their displayed catalogue information.
-8. Choose **Download Selected** to download the represented Markdown files individually.
-9. Double-click a catalogue row to view its rendered Markdown.
-10. Expand the version count to inspect retained historical versions.
-11. Choose **Upload Markdown** or drag `.md` files onto the page to import them.
-12. Choose **Delete Selected** to move all versions of selected series to the server's `Deleted` folder.
-13. Choose **Rescan** after changing source files outside the application.
+5. Browse the catalogue grouped by project. `Unassigned` appears first, followed by the other projects alphabetically.
+6. Expand or collapse individual project groups, or use **Expand All** and **Collapse All**.
+7. Browse or search the current catalogue.
+8. Select entries with normal desktop selection controls.
+9. Press Ctrl/Command+C to copy their displayed catalogue information.
+10. Choose **Download Selected** to download the represented Markdown files individually.
+11. Double-click a catalogue row to view its rendered Markdown.
+12. Expand the version count to inspect retained historical versions.
+13. Choose **Upload Markdown** or drag `.md` files onto the page to import them.
+14. Choose **Delete Selected** to move all versions of selected series to the server's `Deleted` folder.
+15. Choose **Rescan** after changing source files outside the application.
 
 A browser may request permission when several selected files are downloaded separately.
 

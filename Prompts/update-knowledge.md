@@ -1,8 +1,9 @@
 BEGIN_KNOWLEDGE_HEADER
+PROJECT: ZMemoLibrary
 ID: 9b7ee392-9b95-458a-a50a-47a2a327f1c8
 TITLE: LLM Instruction - Update Existing Knowledge File
 CREATED: 2026-06-21
-UPDATED: 2026-06-21
+UPDATED: 2026-08-06
 SUMMARY: Use this instruction when updating an existing formatted knowledge-library file with new durable content. It preserves the stable GUID, updates relevant metadata, keeps a simple plain-text header, and always checks for connections when multiple files are provided.
 KEYWORDS: LLM knowledge library; update knowledge file; metadata update; GUID preservation; plain text header; connections; content date
 CONNECTIONS: none | No known related knowledge file.
@@ -13,6 +14,14 @@ END_KNOWLEDGE_HEADER
 You are updating one existing knowledge-library file using new durable content.
 
 Do not modify the original file. Generate a new file.
+
+## Project Preservation
+
+- Preserve the existing `PROJECT` value exactly.
+- Do not infer, reconsider, correct, normalise, or replace the project.
+- Preserve `PROJECT: Unassigned` exactly when that is the existing value.
+- Project reassignment is a separate human edit and is outside this task.
+- Project membership does not restrict valid connections within or across projects.
 
 ## Filename Rules
 
@@ -39,6 +48,7 @@ Use this exact plain-text header at the very top of every knowledge file:
 
 ```text
 BEGIN_KNOWLEDGE_HEADER
+PROJECT: <human-nominated project name or Unassigned>
 ID: <guid>
 TITLE: <short human-readable title>
 CREATED: <YYYY-MM-DD>
@@ -56,13 +66,16 @@ This is not YAML. Do not use YAML indentation. Do not use frontmatter `---` line
 - The first line of the file must be exactly `BEGIN_KNOWLEDGE_HEADER`.
 - The header must end with exactly `END_KNOWLEDGE_HEADER`.
 - Use exactly these fields in exactly this order:
-  1. `ID:`
-  2. `TITLE:`
-  3. `CREATED:`
-  4. `UPDATED:`
-  5. `SUMMARY:`
-  6. `KEYWORDS:`
-  7. `CONNECTIONS:`
+  1. `PROJECT:`
+  2. `ID:`
+  3. `TITLE:`
+  4. `CREATED:`
+  5. `UPDATED:`
+  6. `SUMMARY:`
+  7. `KEYWORDS:`
+  8. `CONNECTIONS:`
+- Preserve the existing `PROJECT` value exactly.
+- Do not infer or change `PROJECT`.
 - Do not add extra header fields.
 - Do not remove header fields.
 - Keep each header field on one physical line.
@@ -124,7 +137,7 @@ Create a connection only when the relationship is clear and useful for future re
 
 Good connection reasons include:
 
-- same specific project;
+- direct dependency or continuation within the same project;
 - same VPS, server, repo, codebase, website, domain, workflow, or environment;
 - direct continuation of the same task;
 - one file depends on, supersedes, or explains another;
@@ -138,6 +151,7 @@ Bad connection reasons include:
 - both files are about servers in general;
 - both files are old;
 - both files are in the same folder but have no useful content relationship.
+- both files belong to the same project but have no direct useful relationship.
 
 If only one file is provided, use `CONNECTIONS: none | No known related knowledge file.`.
 
@@ -169,6 +183,9 @@ If the existing file or update content is missing, ask for it instead of guessin
 Before returning, verify the generated file itself:
 
 - Line 1 is exactly `BEGIN_KNOWLEDGE_HEADER`.
+- `PROJECT` is the first header field.
+- The existing `PROJECT` value was preserved exactly.
+- There is exactly one `PROJECT:` line.
 - The header fields are present in the required order.
 - Every header field is on one line.
 - There is exactly one `CONNECTIONS:` line.

@@ -8,7 +8,7 @@ public static class KnowledgeFileParser
     private const string HeaderEnd = "END_KNOWLEDGE_HEADER";
     private static readonly string[] RequiredFields =
     [
-        "ID", "TITLE", "CREATED", "UPDATED", "SUMMARY", "KEYWORDS", "CONNECTIONS"
+        "PROJECT", "ID", "TITLE", "CREATED", "UPDATED", "SUMMARY", "KEYWORDS", "CONNECTIONS"
     ];
 
     public static KnowledgeVersion Parse(string filePath, string rootPath)
@@ -54,6 +54,12 @@ public static class KnowledgeFileParser
             values[field] = line[(separatorIndex + 1)..].Trim();
         }
 
+        var project = values["PROJECT"];
+        if (string.IsNullOrWhiteSpace(project))
+            throw new InvalidDataException("PROJECT is required.");
+        if (string.Equals(project, "Unassigned", StringComparison.OrdinalIgnoreCase) && project != "Unassigned")
+            throw new InvalidDataException("The reserved project name must use the exact spelling Unassigned.");
+
         if (!Guid.TryParse(values["ID"], out var id))
             throw new InvalidDataException("ID must be a valid GUID.");
         if (!DateOnly.TryParseExact(values["CREATED"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var created))
@@ -82,6 +88,7 @@ public static class KnowledgeFileParser
             Path.GetFullPath(filePath),
             relativePath,
             Path.GetFileName(filePath),
+            project,
             values["TITLE"],
             created,
             updated,

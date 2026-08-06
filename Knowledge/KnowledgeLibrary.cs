@@ -45,6 +45,8 @@ public sealed class KnowledgeLibrary
             }
         }
 
+        ApplyCanonicalProjectNames(parsedVersions, issues);
+
         var versionsByKey = new Dictionary<string, KnowledgeVersion>(StringComparer.OrdinalIgnoreCase);
         var currentSeries = new List<KnowledgeSeries>();
         var ambiguousSeries = new List<AmbiguousKnowledgeSeries>();
@@ -152,6 +154,7 @@ public sealed class KnowledgeLibrary
             results.Add((new KnowledgeListItemResponse(
                 series.Id,
                 version.VersionKey,
+                version.Project,
                 version.Title,
                 version.Updated,
                 version.Summary,
@@ -168,6 +171,7 @@ public sealed class KnowledgeLibrary
                 results.Add((new KnowledgeListItemResponse(
                     series.Id,
                     null,
+                    series.Candidates[0].Project,
                     $"Ambiguous current version ({series.Candidates.Count} candidates)",
                     series.LatestDate,
                     "This series is excluded from search, copying, and selected-file downloads until its current-version conflict is resolved.",
@@ -409,6 +413,25 @@ public sealed class KnowledgeLibrary
             throw new IOException($"The source file changed after the last scan: {displayPath}. Rescan and try again.");
     }
 
+
+    private static void ApplyCanonicalProjectNames(List<KnowledgeVersion> versions, List<KnowledgeScanIssue> issues)
+    {
+        foreach (var group in versions.GroupBy(version => version.Project, StringComparer.OrdinalIgnoreCase))
+        {
+            var spellings = group.Select(version => version.Project).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToList();
+            var canonicalName = spellings[0];
+            foreach (var version in group)
+                version.Project = canonicalName;
+
+            if (spellings.Count > 1)
+            {
+                issues.Add(new KnowledgeScanIssue(
+                    string.Join("; ", group.Select(version => version.RelativePath).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)),
+                    $"Project name uses inconsistent casing: {string.Join(", ", spellings)}. These files are grouped as {canonicalName}."));
+            }
+        }
+    }
+
     private static List<string> SplitSearchTerms(string? query)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -425,13 +448,15 @@ public sealed class KnowledgeLibrary
             return 0;
 
         var keywords = string.Join(' ', version.Keywords);
-        var searchable = string.Join("\n", version.Title, keywords, version.Summary, version.Body, version.SeriesId.ToString());
+        var searchable = string.Join("\n", version.Project, version.Title, keywords, version.Summary, version.Body, version.SeriesId.ToString());
         if (terms.Any(term => !searchable.Contains(term, StringComparison.OrdinalIgnoreCase)))
             return -1;
 
         var score = 0;
         foreach (var term in terms)
         {
+            if (version.Project.Contains(term, StringComparison.OrdinalIgnoreCase))
+                score += 80;
             if (version.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
                 score += 100;
             if (version.Keywords.Any(keyword => keyword.Contains(term, StringComparison.OrdinalIgnoreCase)))
