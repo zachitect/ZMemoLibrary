@@ -118,7 +118,7 @@
     .status > * { min-width: 0; }
     .error { color: var(--error); }
     .root-path, .guid, .history-meta, .result-outcome, .result-message, #viewerMeta { overflow-wrap: anywhere; }
-    .catalogue-section { position: relative; min-height: 0; padding: 14px 18px 8px; display: flex; flex-direction: column; overflow: hidden; }
+    .catalogue-section { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 14px 18px 8px; display: flex; flex-direction: column; overflow: hidden; }
     .catalogue-heading-row { flex: none; margin: 0 0 7px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .catalogue-heading { margin: 0; }
     .catalogue-heading-actions { flex: none; display: flex; gap: 8px; }
@@ -249,8 +249,12 @@
     body[data-theme="light"] dialog::backdrop { background: rgba(38,50,68,.52); }
 
     .catalogue-workspace {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
       min-height: 0;
       display: block;
+      overflow: hidden;
     }
     .knowledge-index {
       min-height: 0;
@@ -588,6 +592,6 @@
     </div>
   </dialog>
 
-<script src="/app.js?v=project-groups-1"></script>
+<script src="/app.js?v=selection-scroll-fix-1"></script>
 </body>
 </html>

@@ -222,6 +222,12 @@
       });
   }
 
+  function getVisibleEntries() {
+    return getProjectGroups()
+      .filter(group => !state.collapsedProjects.has(group.project))
+      .flatMap(group => group.entries);
+  }
+
   function createProjectHeader(group, contentId, className) {
     const button = document.createElement("button");
     button.type = "button";
@@ -431,13 +437,22 @@
     const preserve = event.ctrlKey || event.metaKey;
 
     if (event.shiftKey && state.lastSelectedIndex !== null) {
+      const visibleEntries = getVisibleEntries();
+      const anchorPosition = visibleEntries.findIndex(entry => entry.index === state.lastSelectedIndex);
+      const currentPosition = visibleEntries.findIndex(entry => entry.index === index);
+
       if (!preserve) state.selected.clear();
-      const start = Math.min(state.lastSelectedIndex, index);
-      const end = Math.max(state.lastSelectedIndex, index);
-      for (let i = start; i <= end; i++) {
-        const rangeItem = state.items[i];
-        if (rangeItem.versionKey && !rangeItem.isAmbiguous)
-          state.selected.set(rangeItem.versionKey, rangeItem);
+      if (anchorPosition >= 0 && currentPosition >= 0) {
+        const start = Math.min(anchorPosition, currentPosition);
+        const end = Math.max(anchorPosition, currentPosition);
+        for (let position = start; position <= end; position++) {
+          const rangeItem = visibleEntries[position].item;
+          if (rangeItem.versionKey && !rangeItem.isAmbiguous)
+            state.selected.set(rangeItem.versionKey, rangeItem);
+        }
+      } else {
+        state.selected.set(item.versionKey, item);
+        state.lastSelectedIndex = index;
       }
     } else if (preserve) {
       if (state.selected.has(item.versionKey)) state.selected.delete(item.versionKey);
@@ -810,7 +825,7 @@
   }
 
   function updateSelectionBar() {
-    const visibleSelected = state.items.filter(item => item.versionKey && state.selected.has(item.versionKey)).length;
+    const visibleSelected = getVisibleEntries().filter(entry => entry.item.versionKey && state.selected.has(entry.item.versionKey)).length;
     const total = state.selected.size;
     elements.selectionCount.textContent = total === 0
       ? "0 selected · Ctrl+C copies displayed summaries"
@@ -950,9 +965,9 @@
 
     if (event.key.toLowerCase() === "a" && (active === elements.list || elements.list.contains(active))) {
       event.preventDefault();
-      for (const item of state.items) {
-        if (item.versionKey && !item.isAmbiguous)
-          state.selected.set(item.versionKey, item);
+      for (const entry of getVisibleEntries()) {
+        if (entry.item.versionKey && !entry.item.isAmbiguous)
+          state.selected.set(entry.item.versionKey, entry.item);
       }
       renderList();
       return;
