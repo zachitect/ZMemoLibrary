@@ -148,21 +148,7 @@ jobs:
             exit 1
           fi
 
-          unexpected_top_level_entry="$(
-            find "$publish_directory" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              ! -name "$executable_name" \
-              ! -name README.md \
-              ! -name wwwroot \
-              -print \
-              -quit
-          )"
-
-          if [ -n "$unexpected_top_level_entry" ]; then
-            echo "Unexpected top-level publish entry: $unexpected_top_level_entry"
-            exit 1
-          fi
+          test -s "$publish_directory/ZMemoLibrary.staticwebassets.endpoints.json"
 
       - name: Create package
         id: package
@@ -204,6 +190,7 @@ jobs:
           echo "$package_listing" | grep -E '(^|/)README\.md$'
           echo "$package_listing" | grep -E '(^|/)wwwroot/index\.html$'
           echo "$package_listing" | grep -E '(^|/)wwwroot/app\.js$'
+          echo "$package_listing" | grep -E '(^|/)ZMemoLibrary\.staticwebassets\.endpoints\.json$'
 
           if [ "${{ matrix.runtime }}" = "win-x64" ]; then
             echo "$package_listing" | grep -E '(^|/)ZMemoLibrary\.exe$'
