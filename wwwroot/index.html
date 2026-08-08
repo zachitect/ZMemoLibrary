@@ -3,6 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    (() => {
+      const preference = localStorage.getItem("zmemolibrary.themePreference");
+      const theme = preference === "light" || preference === "dark"
+        ? preference
+        : (new Date().getHours() >= 18 || new Date().getHours() < 6 ? "dark" : "light");
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <title>ZMemoLibrary</title>
   <style>
     :root {
@@ -491,6 +500,7 @@
         <button class="mobile-menu-action" type="button" data-prompt-key="update" data-prompt-title="Update an Existing Knowledge File">Update Knowledge</button>
         <button class="mobile-menu-action" type="button" data-prompt-key="connections" data-prompt-title="Review Knowledge Connections">Review Connections</button>
         <div class="mobile-menu-section">Application</div>
+        <a class="mobile-menu-action" href="/memo">Memo</a>
         <a class="mobile-menu-action" href="/settings">Settings</a>
         <form method="post" action="/logout"><button class="mobile-menu-action" type="submit">Logout</button></form>
       </nav>
@@ -534,6 +544,8 @@
     <div class="site-credit">
       <div class="site-credit-left">
         <span>Z-Memo-Library 2026</span>
+        <span aria-hidden="true">·</span>
+        <a class="site-credit-access" href="/memo">Memo</a>
         <span aria-hidden="true">·</span>
         <a class="site-credit-access" href="/settings">Settings</a>
         <span aria-hidden="true">·</span>
@@ -592,6 +604,6 @@
     </div>
   </dialog>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=theme-preference-1"></script>
 </body>
 </html>

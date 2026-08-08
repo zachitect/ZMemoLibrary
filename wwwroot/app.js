@@ -61,18 +61,54 @@
   let viewerDownloadUrl = "";
   let catalogueScrollFrame = null;
 
-  function setTheme(theme) {
-    document.documentElement.dataset.theme = theme;
-    document.body.dataset.theme = theme;
-    const switchToDay = theme === "dark";
-    elements.themeToggle.textContent = switchToDay ? "☀" : "☾";
-    elements.themeToggle.setAttribute("aria-label", switchToDay ? "Switch to day theme" : "Switch to night theme");
-    elements.themeToggle.title = switchToDay ? "Switch to day theme" : "Switch to night theme";
+  const themePreferenceKey = "zmemolibrary.themePreference";
+  let activeTheme = "dark";
+  let automaticThemeTimer = null;
+
+  function resolveAutomaticTheme(date = new Date()) {
+    const hour = date.getHours();
+    return hour >= 18 || hour < 6 ? "dark" : "light";
   }
 
-  function setInitialTheme() {
-    const hour = new Date().getHours();
-    setTheme(hour >= 18 || hour < 6 ? "dark" : "light");
+  function getThemePreference() {
+    const preference = localStorage.getItem(themePreferenceKey);
+    return preference === "light" || preference === "dark" ? preference : null;
+  }
+
+  function applyTheme(theme) {
+    activeTheme = theme;
+    document.documentElement.dataset.theme = theme;
+    document.body.dataset.theme = theme;
+    const isDark = theme === "dark";
+    elements.themeToggle.textContent = isDark ? "☾" : "☀";
+    elements.themeToggle.setAttribute("aria-label", isDark ? "Switch to day theme" : "Switch to night theme");
+    elements.themeToggle.title = isDark ? "Switch to day theme" : "Switch to night theme";
+  }
+
+  function scheduleAutomaticThemeRefresh() {
+    clearTimeout(automaticThemeTimer);
+    if (getThemePreference() !== null) return;
+
+    const now = new Date();
+    const nextBoundary = new Date(now);
+    if (now.getHours() < 6) {
+      nextBoundary.setHours(6, 0, 0, 0);
+    } else if (now.getHours() < 18) {
+      nextBoundary.setHours(18, 0, 0, 0);
+    } else {
+      nextBoundary.setDate(nextBoundary.getDate() + 1);
+      nextBoundary.setHours(6, 0, 0, 0);
+    }
+
+    automaticThemeTimer = setTimeout(() => {
+      if (getThemePreference() === null) applyTheme(resolveAutomaticTheme());
+      scheduleAutomaticThemeRefresh();
+    }, nextBoundary.getTime() - now.getTime() + 100);
+  }
+
+  function initialiseTheme() {
+    applyTheme(getThemePreference() ?? resolveAutomaticTheme());
+    scheduleAutomaticThemeRefresh();
   }
 
   async function request(url, options) {
@@ -887,7 +923,16 @@
   });
 
   elements.themeToggle.addEventListener("click", () => {
-    setTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
+    const theme = activeTheme === "dark" ? "light" : "dark";
+    localStorage.setItem(themePreferenceKey, theme);
+    applyTheme(theme);
+    scheduleAutomaticThemeRefresh();
+  });
+
+  window.addEventListener("storage", event => {
+    if (event.key !== themePreferenceKey) return;
+    applyTheme(event.newValue === "light" || event.newValue === "dark" ? event.newValue : resolveAutomaticTheme());
+    scheduleAutomaticThemeRefresh();
   });
 
   elements.mobileMore.addEventListener("click", event => {
@@ -990,6 +1035,6 @@
     }
   });
 
-  setInitialTheme();
+  initialiseTheme();
   load();
 })();

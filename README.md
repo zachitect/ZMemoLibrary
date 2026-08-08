@@ -1,6 +1,6 @@
 # ZMemoLibrary
 
-ZMemoLibrary is a small ASP.NET Core web application for securely browsing, searching, inspecting, uploading, downloading, and deleting curated Markdown knowledge files used with chat-based LLMs.
+ZMemoLibrary is a small ASP.NET Core web application for securely browsing, searching, inspecting, uploading, downloading, and recoverably deleting curated Markdown knowledge files used with chat-based LLMs. It also provides one shared Markdown memo for free-form notes.
 
 The Markdown files remain the source of truth. The application scans them into an in-memory catalogue and uses a shared passcode to protect the webpage and every API endpoint.
 
@@ -30,7 +30,11 @@ The Markdown files remain the source of truth. The application scans them into a
 - Uploads Markdown knowledge files through the webpage or drag and drop.
 - Deletes selected knowledge series by moving their files to the server's `Deleted` folder for manual inspection.
 - Provides embedded prompts for creating, updating, and connecting knowledge files.
-- Provides day and night themes, with the initial theme chosen from local time.
+- Provides one shared Markdown memo with safe read-only rendering and explicit editing.
+- Allows only one browser tab to edit the memo at a time through an expiring server lease.
+- Protects memo saves with SHA-256 revision checks and safe temporary-file replacement.
+- Shares day and night theme preference across Library, Memo, Settings, Setup, and Access.
+- Uses local time automatically when no manual theme preference exists: day from 06:00 to 17:59 and night from 18:00 to 05:59.
 - Displays scan errors without preventing valid files from loading.
 
 ## Technology
@@ -50,6 +54,7 @@ The Markdown files remain the source of truth. The application scans them into a
 ZMemoLibrary/
 ├── AppData/                         # Generated locally; never commit
 │   ├── access.json                  # Passcode hash and session version
+│   ├── memo.md                      # Shared free-form Markdown memo
 │   └── settings.json                # Knowledge directory and HTTP port
 ├── Endpoints/
 │   ├── DownloadEndpoints.cs
@@ -141,13 +146,28 @@ There is intentionally no public recovery endpoint. To reset access:
 
 Deleting the file returns the application to first-run setup and invalidates all previous sessions.
 
-### Deployment requirements
+### Memo Routes
+
+The authenticated Memo workflow uses:
+
+```text
+GET  /memo
+GET  /api/memo
+POST /api/memo/lease
+POST /api/memo/heartbeat
+POST /api/memo/release
+PUT  /api/memo
+```
+
+These are internal browser-to-server application boundaries, not a public integration API.
+
+## Deployment requirements
 
 - Serve the application through HTTPS when it is reachable outside a trusted local network.
 - Keep `AppData/access.json` outside source control and inaccessible from the public web root.
 - Preserve the `AppData` directory across application updates if the application is redeployed by replacing its publish directory. This retains both access protection and runtime settings.
 - Restrict filesystem access to the operating-system account that runs ZMemoLibrary.
-- Back up the `AppData` directory if preserving the current passcode and runtime settings across server recovery matters.
+- Back up the `AppData` directory if preserving the current passcode, runtime settings, and shared memo across server recovery matters.
 
 ## Knowledge File Format
 
@@ -190,6 +210,24 @@ Header requirements:
 - A connection GUID and its reason are separated with `|`.
 - Files must be valid UTF-8.
 
+## Shared Memo
+
+Select **Memo** from the Library to open the shared free-form Markdown memo. It is stored as `AppData/memo.md`, relative to the application content root.
+
+- The file is ordinary UTF-8 Markdown and may also be used as plain text.
+- It is created on the first successful save.
+- It remains separate from the configured knowledge library and is not scanned, searched, versioned, connected, uploaded, or shown in the catalogue.
+- Read-only mode safely renders Markdown; editing mode shows the complete plain source.
+- **Start Editing** requests the exclusive editing lease.
+- The first browser tab to acquire the lease wins; other tabs remain read-only.
+- **Save** writes explicitly and retains the lease.
+- **Finish Editing** releases the lease and returns to rendered mode.
+- **Reload** retrieves the latest saved content and cannot silently discard unsaved source.
+- The lease lasts 30 seconds, heartbeats every 10 seconds, and stops renewing after two minutes without editor activity.
+- Saves require the loaded SHA-256 revision and are rejected if the lease or revision is stale.
+- Memo content is limited to 1 MiB of UTF-8 data and is replaced through a sibling temporary file.
+- There is no autosave, history, forced takeover, attachment support, or multiple-memo model.
+
 ## Configuration
 
 ZMemoLibrary keeps its application-specific runtime settings in:
@@ -208,6 +246,18 @@ Application state: setup required
 After creating the passcode, the authenticated browser is redirected to `/setup`. Enter an existing absolute server path for the knowledge library and choose an HTTP port from `1024` to `65535`. Saving setup creates `AppData/settings.json`, scans the selected directory, and opens the library. The knowledge directory takes effect immediately; a changed port takes effect after restarting the application.
 
 The repository `.gitignore` excludes both the default `KnowledgeFiles/` directory and the generated `AppData/` directory.
+
+## Themes
+
+Theme behaviour is shared across Library, Memo, Settings, Setup, and Access.
+
+- With no manual preference, local browser time selects day from 06:00 through 17:59 and night from 18:00 through 05:59.
+- Automatic mode updates at the next 06:00 or 18:00 boundary.
+- Clicking a theme button stores a manual `light` or `dark` preference.
+- The manual preference overrides local time across navigation and refreshes.
+- Other open application tabs follow preference changes through browser storage events.
+- Logout, authentication expiry, settings changes, and memo editing do not clear the preference.
+- The icon reflects the active palette: `☀` for day/light and `☾` for night/dark. Its label describes the next action.
 
 ## Run Locally
 
@@ -238,17 +288,18 @@ On first launch, create the shared passcode in the browser. Later launches show 
 2. Open the configured HTTP address; a new installation uses `http://localhost:9000`.
 3. Create the shared passcode on first launch, or enter the existing passcode.
 4. Open **Settings** and choose the knowledge library directory and HTTP port.
+6. Open **Memo** to read or edit the shared Markdown memo.
 5. Browse the catalogue grouped by project. `Unassigned` appears first, followed by the other projects alphabetically.
-6. Expand or collapse individual project groups, or use **Expand All** and **Collapse All**.
-7. Browse or search the current catalogue.
-8. Select entries with normal desktop selection controls.
-9. Press Ctrl/Command+C to copy their displayed catalogue information.
-10. Choose **Download Selected** to download the represented Markdown files individually.
-11. Double-click a catalogue row to view its rendered Markdown.
-12. Expand the version count to inspect retained historical versions.
-13. Choose **Upload Markdown** or drag `.md` files onto the page to import them.
-14. Choose **Delete Selected** to move all versions of selected series to the server's `Deleted` folder.
-15. Choose **Rescan** after changing source files outside the application.
+7. Expand or collapse individual project groups, or use **Expand All** and **Collapse All**.
+8. Browse or search the current catalogue.
+9. Select entries with normal desktop selection controls.
+10. Press Ctrl/Command+C to copy their displayed catalogue information.
+11. Choose **Download Selected** to download the represented Markdown files individually.
+12. Double-click a catalogue row to view its rendered Markdown.
+13. Expand the version count to inspect retained historical versions.
+14. Choose **Upload Markdown** or drag `.md` files onto the page to import them.
+15. Choose **Delete Selected** to move all versions of selected series to the server's `Deleted` folder.
+16. Choose **Rescan** after changing source files outside the application.
 
 A browser may request permission when several selected files are downloaded separately.
 
@@ -277,6 +328,8 @@ It can:
 - move all physical versions of a selected knowledge series into the server's `Deleted` folder.
 
 Deletion is deliberately recoverable at the filesystem level: files are moved rather than permanently erased.
+
+Library scanning and mutation are serialised. Recursive scans do not follow reparse-point directory escapes. Knowledge files are limited to 10 MiB, and downloads or mutations reverify the scanned SHA-256 key. A multi-file upload is handled as one coherent operation with ordered per-file results and one final catalogue snapshot.
 
 ## Deployment
 
@@ -428,7 +481,7 @@ Linux and macOS releases are preferably distributed as `.tar.gz` archives so Uni
 
 ### Upgrading an existing deployment
 
-Preserve the deployed `AppData` directory when replacing application files. It contains the local passcode verifier and runtime settings.
+Preserve the deployed `AppData` directory when replacing application files. It contains the local passcode verifier, runtime settings, and shared memo.
 
 Recommended upgrade sequence:
 
@@ -445,7 +498,7 @@ Do not copy a development or release-build `AppData` directory over an existing 
 Before pushing to a public Git repository:
 
 - Do not commit private knowledge files.
-- Do not commit or package any file under `AppData/`; it contains the passcode verifier, session state, machine-specific knowledge directory, and HTTP port.
+- Do not commit or package any file under `AppData/`; it contains the passcode verifier, session state, machine-specific settings, and shared memo content.
 - Do not commit certificates, keys, secrets, publish profiles, logs, or build output.
 - Check staged files before the first commit:
 
@@ -462,7 +515,8 @@ ZMemoLibrary intentionally does not include:
 - roles or per-user permissions;
 - self-registration or password recovery;
 - a database;
-- knowledge editing in the browser;
+- knowledge-file editing in the browser;
+- multiple memos, memo history, memo autosave, attachments, or forced editing takeover;
 - LLM calls;
 - RAG or vector search;
 - automatic filesystem watching;
