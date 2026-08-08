@@ -1,0 +1,324 @@
+name: Publish Release Packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore ZMemoLibrary.csproj
+
+      - name: Build
+        run: dotnet build ZMemoLibrary.csproj --configuration Release --no-restore
+
+  publish:
+    name: Publish ${{ matrix.runtime }}
+    needs: validate
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - win-x64
+          - linux-x64
+          - linux-arm64
+          - osx-arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$version" =~ ^v[0-9]+(\.[0-9]+){1,3}([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $version"
+            echo "Use a version such as v1.0.0."
+            exit 1
+          fi
+
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
+          echo "package_version=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish self-contained single-file application
+        shell: bash
+        run: |
+          publish_directory="publish/${{ matrix.runtime }}"
+          rm -rf "$publish_directory"
+
+          dotnet publish ZMemoLibrary.csproj \
+            --configuration Release \
+            --runtime "${{ matrix.runtime }}" \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:PublishTrimmed=false \
+            -p:PublishReadyToRun=false \
+            -p:DebugType=None \
+            -p:DebugSymbols=false \
+            --output "$publish_directory"
+
+      - name: Add README
+        shell: bash
+        run: cp README.md "publish/${{ matrix.runtime }}/README.md"
+
+      - name: Set executable permission
+        if: matrix.runtime != 'win-x64'
+        shell: bash
+        run: chmod +x "publish/${{ matrix.runtime }}/ZMemoLibrary"
+
+      - name: Validate publish output
+        shell: bash
+        run: |
+          publish_directory="publish/${{ matrix.runtime }}"
+
+          test -d "$publish_directory"
+          test -s "$publish_directory/README.md"
+          test -s "$publish_directory/wwwroot/index.html"
+          test -s "$publish_directory/wwwroot/app.js"
+
+          if [ "${{ matrix.runtime }}" = "win-x64" ]; then
+            executable_name="ZMemoLibrary.exe"
+          else
+            executable_name="ZMemoLibrary"
+          fi
+
+          test -s "$publish_directory/$executable_name"
+
+          prohibited_path="$(
+            find "$publish_directory" \
+              \( \
+                -type d \( \
+                  -name AppData -o \
+                  -name KnowledgeFiles -o \
+                  -name Deleted -o \
+                  -name bin -o \
+                  -name obj -o \
+                  -name publish \
+                \) \
+                -o \
+                -type f \( \
+                  -name access.json -o \
+                  -name settings.json -o \
+                  -name memo.md \
+                \) \
+              \) \
+              -print \
+              -quit
+          )"
+
+          if [ -n "$prohibited_path" ]; then
+            echo "Prohibited release content found: $prohibited_path"
+            exit 1
+          fi
+
+          unexpected_top_level_entry="$(
+            find "$publish_directory" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              ! -name "$executable_name" \
+              ! -name README.md \
+              ! -name wwwroot \
+              -print \
+              -quit
+          )"
+
+          if [ -n "$unexpected_top_level_entry" ]; then
+            echo "Unexpected top-level publish entry: $unexpected_top_level_entry"
+            exit 1
+          fi
+
+      - name: Create package
+        id: package
+        shell: bash
+        run: |
+          mkdir -p packages
+          base_name="ZMemoLibrary-${{ steps.version.outputs.package_version }}-${{ matrix.runtime }}"
+
+          if [ "${{ matrix.runtime }}" = "win-x64" ]; then
+            package_path="packages/${base_name}.zip"
+            (
+              cd "publish/${{ matrix.runtime }}"
+              zip -q -r "../../$package_path" .
+            )
+          else
+            package_path="packages/${base_name}.tar.gz"
+            tar -czf "$package_path" -C "publish/${{ matrix.runtime }}" .
+          fi
+
+          test -s "$package_path"
+          echo "path=$package_path" >> "$GITHUB_OUTPUT"
+
+      - name: Validate package contents
+        shell: bash
+        run: |
+          package_path="${{ steps.package.outputs.path }}"
+
+          if [[ "$package_path" == *.zip ]]; then
+            package_listing="$(unzip -Z1 "$package_path")"
+          else
+            package_listing="$(tar -tzf "$package_path")"
+          fi
+
+          if echo "$package_listing" | grep -E '(^|/)(AppData|KnowledgeFiles|Deleted|bin|obj|publish)(/|$)|(^|/)(access\.json|settings\.json|memo\.md)$'; then
+            echo "The package contains prohibited runtime or private content."
+            exit 1
+          fi
+
+          echo "$package_listing" | grep -E '(^|/)README\.md$'
+          echo "$package_listing" | grep -E '(^|/)wwwroot/index\.html$'
+          echo "$package_listing" | grep -E '(^|/)wwwroot/app\.js$'
+
+          if [ "${{ matrix.runtime }}" = "win-x64" ]; then
+            echo "$package_listing" | grep -E '(^|/)ZMemoLibrary\.exe$'
+          else
+            echo "$package_listing" | grep -E '(^|/)ZMemoLibrary$'
+          fi
+
+      - name: Generate SHA-256 checksum
+        shell: bash
+        run: |
+          package_path="${{ steps.package.outputs.path }}"
+          sha256sum "$package_path" > "${package_path}.sha256"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.runtime }}
+          path: |
+            ${{ steps.package.outputs.path }}
+            ${{ steps.package.outputs.path }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$version" =~ ^v[0-9]+(\.[0-9]+){1,3}([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $version"
+            exit 1
+          fi
+
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-packages
+          merge-multiple: true
+
+      - name: Validate release packages
+        shell: bash
+        run: |
+          find release-packages -maxdepth 1 -type f -print | sort
+
+          package_count="$(
+            find release-packages \
+              -maxdepth 1 \
+              -type f \
+              \( -name "*.zip" -o -name "*.tar.gz" \) \
+              | wc -l
+          )"
+
+          checksum_count="$(
+            find release-packages \
+              -maxdepth 1 \
+              -type f \
+              -name "*.sha256" \
+              | wc -l
+          )"
+
+          if [ "$package_count" -ne 4 ]; then
+            echo "Expected 4 packages, found $package_count."
+            exit 1
+          fi
+
+          if [ "$checksum_count" -ne 4 ]; then
+            echo "Expected 4 checksum files, found $checksum_count."
+            exit 1
+          fi
+
+          (
+            cd release-packages
+            sha256sum --check *.sha256
+          )
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+
+          if ! git ls-remote --exit-code origin "refs/tags/$tag" > /dev/null 2>&1; then
+            gh api \
+              --method POST \
+              "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/tags/$tag" \
+              -f sha="${{ github.sha }}"
+          fi
+
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" release-packages/* --clobber
+          else
+            gh release create "$tag" \
+              release-packages/* \
+              --title "ZMemoLibrary $tag" \
+              --generate-notes
+          fi
