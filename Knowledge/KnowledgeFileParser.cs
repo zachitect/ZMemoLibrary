@@ -4,6 +4,8 @@ using System.Text;
 
 public static class KnowledgeFileParser
 {
+    public const int MaximumFileSizeBytes = 10 * 1024 * 1024;
+
     private const string HeaderStart = "BEGIN_KNOWLEDGE_HEADER";
     private const string HeaderEnd = "END_KNOWLEDGE_HEADER";
     private static readonly string[] RequiredFields =
@@ -14,7 +16,13 @@ public static class KnowledgeFileParser
     public static KnowledgeVersion Parse(string filePath, string rootPath)
     {
         var file = new FileInfo(filePath);
+        if (file.Length > MaximumFileSizeBytes)
+            throw new InvalidDataException("File exceeds the 10 MiB knowledge file limit.");
+
         var rawBytes = File.ReadAllBytes(filePath);
+        if (rawBytes.Length > MaximumFileSizeBytes)
+            throw new InvalidDataException("File exceeds the 10 MiB knowledge file limit.");
+
         var fileModifiedUtc = file.LastWriteTimeUtc;
         var fileCreatedUtc = GetCreationTimeUtc(file);
         string rawText;

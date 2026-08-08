@@ -34,7 +34,6 @@
     deleteSelected: document.querySelector("#deleteSelected"),
     uploadMarkdown: document.querySelector("#uploadMarkdown"),
     uploadInput: document.querySelector("#uploadInput"),
-    catalogueSection: document.querySelector(".catalogue-section"),
     dropOverlay: document.querySelector("#dropOverlay"),
     deleteDialog: document.querySelector("#deleteDialog"),
     deleteMessage: document.querySelector("#deleteMessage"),
@@ -57,6 +56,7 @@
   };
 
   let searchTimer = null;
+  let loadGeneration = 0;
   let viewerContent = "";
   let viewerDownloadUrl = "";
   let catalogueScrollFrame = null;
@@ -93,6 +93,7 @@
   }
 
   async function load() {
+    const generation = ++loadGeneration;
     elements.status.textContent = "Loading knowledge catalogue...";
     elements.indexCount.textContent = "…";
     elements.indexList.innerHTML = '<div class="index-empty">Loading index...</div>';
@@ -102,7 +103,10 @@
         request(`/api/knowledge?query=${encodeURIComponent(state.query)}`)
       ]);
       const status = await statusResponse.json();
-      state.items = await knowledgeResponse.json();
+      const items = await knowledgeResponse.json();
+      if (generation !== loadGeneration) return;
+
+      state.items = items;
       for (const item of state.items) {
         if (item.versionKey && state.selected.has(item.versionKey))
           state.selected.set(item.versionKey, item);
@@ -112,6 +116,8 @@
       state.lastSelectedIndex = null;
       renderList();
     } catch (error) {
+      if (generation !== loadGeneration) return;
+
       elements.status.innerHTML = "";
       const text = document.createElement("span");
       text.className = "error";
@@ -842,19 +848,22 @@
   elements.indexList.addEventListener("keydown", event => {
     const current = event.target.closest(".index-item");
     if (!current) return;
-    const currentIndex = Number(current.dataset.index);
-    let nextIndex = null;
-    if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
-    else if (event.key === "ArrowDown") nextIndex = Math.min(state.items.length - 1, currentIndex + 1);
-    else if (event.key === "Home") nextIndex = 0;
-    else if (event.key === "End") nextIndex = state.items.length - 1;
-    else if (event.key === " ") {
+    if (event.key === " ") {
       event.preventDefault();
       return;
-    } else return;
+    }
+
+    const visibleItems = [...elements.indexList.querySelectorAll(".index-item")];
+    const currentPosition = visibleItems.indexOf(current);
+    let nextPosition;
+    if (event.key === "ArrowUp") nextPosition = Math.max(0, currentPosition - 1);
+    else if (event.key === "ArrowDown") nextPosition = Math.min(visibleItems.length - 1, currentPosition + 1);
+    else if (event.key === "Home") nextPosition = 0;
+    else if (event.key === "End") nextPosition = visibleItems.length - 1;
+    else return;
 
     event.preventDefault();
-    elements.indexList.querySelector(`.index-item[data-index="${nextIndex}"]`)?.focus();
+    visibleItems[nextPosition].focus();
   });
 
   elements.list.addEventListener("scroll", () => {

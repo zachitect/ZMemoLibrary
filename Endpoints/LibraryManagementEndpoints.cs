@@ -15,17 +15,28 @@ public static class LibraryManagementEndpoints
         if (form.Files.Count == 0)
             return Results.BadRequest(new { error = "Choose at least one Markdown file." });
 
-        var results = new List<KnowledgeFileOperationResult>();
-        foreach (var file in form.Files)
+        var uploads = new List<(string FileName, byte[] Content)>();
+        var uploadIndexes = new List<int>();
+        var results = new KnowledgeFileOperationResult?[form.Files.Count];
+        for (var index = 0; index < form.Files.Count; index++)
         {
+            var file = form.Files[index];
+            if (file.Length > KnowledgeFileParser.MaximumFileSizeBytes)
+            {
+                results[index] = new KnowledgeFileOperationResult(file.FileName, null, "Invalid", false, "File exceeds the 10 MiB knowledge file limit.");
+                continue;
+            }
+
             await using var input = file.OpenReadStream();
             using var output = new MemoryStream();
             await input.CopyToAsync(output);
-            results.Add(library.ImportFile(file.FileName, output.ToArray()));
+            uploads.Add((file.FileName, output.ToArray()));
+            uploadIndexes.Add(index);
         }
 
-        if (results.Any(result => result.Succeeded))
-            library.Rescan();
+        var importResults = library.ImportFiles(uploads);
+        for (var index = 0; index < uploads.Count; index++)
+            results[uploadIndexes[index]] = importResults[index];
 
         return Results.Ok(results);
     }
@@ -36,9 +47,6 @@ public static class LibraryManagementEndpoints
             return Results.BadRequest(new { error = "Select at least one knowledge entry to delete." });
 
         var results = library.DeleteSeries(request.VersionKeys);
-        if (results.Any(result => result.Succeeded))
-            library.Rescan();
-
         return Results.Ok(results);
     }
 }

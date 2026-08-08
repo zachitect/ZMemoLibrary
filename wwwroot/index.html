@@ -464,7 +464,7 @@
       </section>
 
       <section class="top-row search-row">
-        <input id="search" type="search" autocomplete="off" placeholder="Search current titles, summaries, keywords, content, or GUID">
+        <input id="search" type="search" autocomplete="off" aria-label="Search current knowledge" placeholder="Search current titles, summaries, keywords, content, or GUID">
         <button id="clearSearch" class="button" type="button">Clear</button>
       </section>
 
@@ -547,9 +547,9 @@
     </div>
   </footer>
 
-  <dialog id="deleteDialog">
+  <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
     <div class="dialog-header">
-      <div class="title">Delete Selected Knowledge?</div>
+      <div id="deleteDialogTitle" class="title">Delete Selected Knowledge?</div>
     </div>
     <div class="dialog-body">
       <p id="deleteMessage" class="confirmation-copy"></p>
@@ -561,7 +561,7 @@
       </div>
     </div>
   </dialog>
-  <dialog id="operationResultsDialog">
+  <dialog id="operationResultsDialog" aria-labelledby="operationResultsTitle">
     <div class="dialog-header">
       <div id="operationResultsTitle" class="title">Operation Results</div>
     </div>
@@ -574,7 +574,7 @@
       </div>
     </div>
   </dialog>
-  <dialog id="viewer">
+  <dialog id="viewer" aria-labelledby="viewerTitle">
     <div class="dialog-header">
       <div id="viewerStatus" class="updated"></div>
       <div id="viewerTitle" class="title"></div>
@@ -592,6 +592,6 @@
     </div>
   </dialog>
 
-<script src="/app.js?v=selection-scroll-fix-1"></script>
+<script src="/app.js"></script>
 </body>
 </html>

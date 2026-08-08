@@ -5,7 +5,7 @@ public sealed class KnowledgeLibrary
     private readonly SettingsStore _settings;
     private readonly ILogger<KnowledgeLibrary> _logger;
     private readonly object _lock = new();
-    private readonly object _mutationLock = new();
+    private readonly object _operationLock = new();
     private LibrarySnapshot _snapshot = LibrarySnapshot.Empty;
 
     public KnowledgeLibrary(SettingsStore settings, ILogger<KnowledgeLibrary> logger)
@@ -15,6 +15,21 @@ public sealed class KnowledgeLibrary
     }
 
     public void Rescan()
+    {
+        lock (_operationLock)
+            RescanCore();
+    }
+
+    public void ApplySettings(string knowledgeLibraryDirectory, int port)
+    {
+        lock (_operationLock)
+        {
+            _settings.Save(knowledgeLibraryDirectory, port);
+            RescanCore();
+        }
+    }
+
+    private void RescanCore()
     {
         var rootPath = Path.GetFullPath(_settings.KnowledgeLibraryDirectory);
 
@@ -213,57 +228,100 @@ public sealed class KnowledgeLibrary
 
     public DownloadedFile? ReadVersionFile(string versionKey)
     {
-        var version = GetVersion(versionKey);
-        return version == null ? null : ReadAndVerify(version);
+        lock (_operationLock)
+        {
+            var version = GetVersion(versionKey);
+            return version == null ? null : ReadAndVerify(version);
+        }
     }
 
-    public KnowledgeFileOperationResult ImportFile(string uploadedFileName, byte[] content)
+    public IReadOnlyList<KnowledgeFileOperationResult> ImportFiles(IReadOnlyList<(string FileName, byte[] Content)> uploads)
     {
-        var fileName = Path.GetFileName(uploadedFileName);
-        if (!string.Equals(fileName, uploadedFileName, StringComparison.Ordinal) || !string.Equals(Path.GetExtension(fileName), ".md", StringComparison.OrdinalIgnoreCase))
-            return new KnowledgeFileOperationResult(uploadedFileName, null, "Invalid", false, "Only plain .md filenames are accepted.");
-
-        lock (_mutationLock)
+        lock (_operationLock)
         {
             var snapshot = GetSnapshot();
+            var results = new List<KnowledgeFileOperationResult>();
             if (!snapshot.IsAvailable)
-                return new KnowledgeFileOperationResult(fileName, null, "Failed", false, "The knowledge library is unavailable.");
-
-            var versionKey = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
-            if (snapshot.VersionsByKey.ContainsKey(versionKey))
-                return new KnowledgeFileOperationResult(fileName, versionKey, "Duplicate", false, "This exact knowledge version already exists.");
-
-            var destinationPath = Path.GetFullPath(Path.Combine(snapshot.RootPath, fileName));
-            if (!IsPathInsideRoot(destinationPath, snapshot.RootPath) || string.Equals(Path.GetFileName(destinationPath), "Deleted", StringComparison.OrdinalIgnoreCase))
-                return new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, "The upload filename is not allowed.");
-
-            if (File.Exists(destinationPath))
-                return new KnowledgeFileOperationResult(fileName, versionKey, "Filename conflict", false, "A different file already uses this filename. Rename the upload and try again.");
-
-            var temporaryPath = Path.Combine(snapshot.RootPath, $".zmemolibrary-upload-{Guid.NewGuid():N}.tmp");
-            try
             {
-                File.WriteAllBytes(temporaryPath, content);
-                var parsed = KnowledgeFileParser.Parse(temporaryPath, snapshot.RootPath);
-                var existingSeries = snapshot.Series.Any(series => series.Id == parsed.SeriesId) || snapshot.AmbiguousSeries.Any(series => series.Id == parsed.SeriesId);
-                File.Move(temporaryPath, destinationPath);
-                return new KnowledgeFileOperationResult(fileName, parsed.VersionKey, existingSeries ? "New version" : "New knowledge", true, existingSeries ? "Added a new version to an existing knowledge series." : "Added a new knowledge series.");
+                foreach (var upload in uploads)
+                    results.Add(new KnowledgeFileOperationResult(upload.FileName, null, "Failed", false, "The knowledge library is unavailable."));
+                return results;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+
+            var knownVersionKeys = snapshot.VersionsByKey.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var knownSeriesIds = snapshot.Series.Select(series => series.Id)
+                .Concat(snapshot.AmbiguousSeries.Select(series => series.Id))
+                .ToHashSet();
+            var importedAny = false;
+
+            foreach (var upload in uploads)
             {
-                return new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, ex.Message);
+                var uploadedFileName = upload.FileName;
+                var content = upload.Content;
+                var fileName = Path.GetFileName(uploadedFileName);
+                if (content.Length > KnowledgeFileParser.MaximumFileSizeBytes)
+                {
+                    results.Add(new KnowledgeFileOperationResult(fileName, null, "Invalid", false, "File exceeds the 10 MiB knowledge file limit."));
+                    continue;
+                }
+                if (!string.Equals(fileName, uploadedFileName, StringComparison.Ordinal) || !string.Equals(Path.GetExtension(fileName), ".md", StringComparison.OrdinalIgnoreCase))
+                {
+                    results.Add(new KnowledgeFileOperationResult(uploadedFileName, null, "Invalid", false, "Only plain .md filenames are accepted."));
+                    continue;
+                }
+
+                var versionKey = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+                if (knownVersionKeys.Contains(versionKey))
+                {
+                    results.Add(new KnowledgeFileOperationResult(fileName, versionKey, "Duplicate", false, "This exact knowledge version already exists."));
+                    continue;
+                }
+
+                var destinationPath = Path.GetFullPath(Path.Combine(snapshot.RootPath, fileName));
+                if (!IsPathInsideRoot(destinationPath, snapshot.RootPath))
+                {
+                    results.Add(new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, "The upload filename is not allowed."));
+                    continue;
+                }
+                if (File.Exists(destinationPath))
+                {
+                    results.Add(new KnowledgeFileOperationResult(fileName, versionKey, "Filename conflict", false, "A different file already uses this filename. Rename the upload and try again."));
+                    continue;
+                }
+
+                var temporaryPath = Path.Combine(snapshot.RootPath, $".zmemolibrary-upload-{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    File.WriteAllBytes(temporaryPath, content);
+                    var parsed = KnowledgeFileParser.Parse(temporaryPath, snapshot.RootPath);
+                    var existingSeries = knownSeriesIds.Contains(parsed.SeriesId);
+                    File.Move(temporaryPath, destinationPath);
+                    knownVersionKeys.Add(parsed.VersionKey);
+                    knownSeriesIds.Add(parsed.SeriesId);
+                    importedAny = true;
+                    results.Add(new KnowledgeFileOperationResult(fileName, parsed.VersionKey, existingSeries ? "New version" : "New knowledge", true, existingSeries ? "Added a new version to an existing knowledge series." : "Added a new knowledge series."));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    results.Add(new KnowledgeFileOperationResult(fileName, versionKey, "Invalid", false, ex.Message));
+                }
+                finally
+                {
+                    if (File.Exists(temporaryPath))
+                        File.Delete(temporaryPath);
+                }
             }
-            finally
-            {
-                if (File.Exists(temporaryPath))
-                    File.Delete(temporaryPath);
-            }
+
+            if (importedAny)
+                RescanCore();
+
+            return results;
         }
     }
 
     public IReadOnlyList<KnowledgeFileOperationResult> DeleteSeries(IReadOnlyList<string> versionKeys)
     {
-        lock (_mutationLock)
+        lock (_operationLock)
         {
             var snapshot = GetSnapshot();
             var results = new List<KnowledgeFileOperationResult>();
@@ -289,16 +347,14 @@ public sealed class KnowledgeLibrary
                         foreach (var physicalPath in version.SourcePaths)
                         {
                             var sourcePath = Path.GetFullPath(physicalPath);
-                            VerifyFile(sourcePath, version.VersionKey, Path.GetRelativePath(snapshot.RootPath, sourcePath));
                             if (!IsPathInsideRoot(sourcePath, snapshot.RootPath))
                                 throw new IOException("A source file is outside the configured knowledge root.");
 
                             var relativePath = Path.GetRelativePath(snapshot.RootPath, sourcePath);
+                            VerifyFile(sourcePath, version.VersionKey, relativePath);
                             var destinationPath = Path.GetFullPath(Path.Combine(archiveRoot, relativePath));
                             if (!IsPathInsideRoot(destinationPath, archiveRoot))
                                 throw new IOException("An archive destination is invalid.");
-                            if (!File.Exists(sourcePath))
-                                throw new IOException($"A source file is missing: {relativePath}.");
                             if (File.Exists(destinationPath))
                                 throw new IOException($"An archived file already exists: Deleted/{relativePath}.");
 
@@ -316,16 +372,32 @@ public sealed class KnowledgeLibrary
                             completedMoves.Add(move);
                         }
                     }
-                    catch
+                    catch (Exception moveException) when (moveException is IOException or UnauthorizedAccessException)
                     {
+                        var rollbackFailures = new List<string>();
                         foreach (var move in completedMoves.AsEnumerable().Reverse())
                         {
-                            if (File.Exists(move.DestinationPath) && !File.Exists(move.SourcePath))
+                            try
                             {
-                                Directory.CreateDirectory(Path.GetDirectoryName(move.SourcePath)!);
-                                File.Move(move.DestinationPath, move.SourcePath);
+                                if (File.Exists(move.DestinationPath) && !File.Exists(move.SourcePath))
+                                {
+                                    Directory.CreateDirectory(Path.GetDirectoryName(move.SourcePath)!);
+                                    File.Move(move.DestinationPath, move.SourcePath);
+                                }
+                            }
+                            catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
+                            {
+                                rollbackFailures.Add($"{Path.GetRelativePath(snapshot.RootPath, move.SourcePath)}: {rollbackException.Message}");
                             }
                         }
+
+                        if (rollbackFailures.Count > 0)
+                        {
+                            throw new IOException(
+                                $"Deletion failed and rollback was incomplete. Inspect the live library and Deleted folder manually. Rollback failures: {string.Join("; ", rollbackFailures)}",
+                                moveException);
+                        }
+
                         throw;
                     }
 
@@ -341,6 +413,9 @@ public sealed class KnowledgeLibrary
                     results.Add(new KnowledgeFileOperationResult(series.CurrentVersion.Title, series.CurrentVersion.VersionKey, "Failed", false, ex.Message));
                 }
             }
+
+            if (results.Any(result => result.Succeeded))
+                RescanCore();
 
             return results;
         }
@@ -363,12 +438,28 @@ public sealed class KnowledgeLibrary
             var directory = pendingDirectories.Pop();
             try
             {
-                files.AddRange(Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly));
+                foreach (var filePath in Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly))
+                {
+                    if ((File.GetAttributes(filePath) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        issues.Add(new KnowledgeScanIssue(Path.GetRelativePath(rootPath, filePath), "Skipped symbolic link or reparse-point file."));
+                        continue;
+                    }
+
+                    files.Add(filePath);
+                }
+
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
                 {
                     if (string.Equals(directory, rootPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) &&
                         string.Equals(Path.GetFileName(childDirectory), "Deleted", StringComparison.OrdinalIgnoreCase))
                     {
+                        continue;
+                    }
+
+                    if ((File.GetAttributes(childDirectory) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        issues.Add(new KnowledgeScanIssue(Path.GetRelativePath(rootPath, childDirectory), "Skipped symbolic link or reparse-point directory."));
                         continue;
                     }
 

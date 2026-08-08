@@ -185,8 +185,7 @@ app.MapPost("/settings", async (HttpContext context, AccessStore accessStore, Se
         return Results.Redirect("/settings?error=New+passcodes+did+not+match.");
 
     var portChanged = settings.Port != port;
-    settings.Save(fullKnowledgeLibraryDirectory, port);
-    knowledgeLibrary.Rescan();
+    knowledgeLibrary.ApplySettings(fullKnowledgeLibraryDirectory, port);
 
     if (newPasscode.Length > 0)
     {
@@ -244,8 +243,7 @@ async Task<IResult> SaveInitialSettings(HttpRequest request, SettingsStore setti
     if (!int.TryParse(portText, out var port) || port is < 1024 or > 65535)
         return Results.Redirect("/setup?error=Port+must+be+between+1024+and+65535.");
 
-    settings.Save(fullKnowledgeLibraryDirectory, port);
-    knowledgeLibrary.Rescan();
+    knowledgeLibrary.ApplySettings(fullKnowledgeLibraryDirectory, port);
     return Results.Redirect("/");
 }
 
@@ -600,10 +598,19 @@ public sealed class AccessStore
     {
         try
         {
-            return JsonSerializer.Deserialize<AccessRecord>(File.ReadAllText(path, Encoding.UTF8))
+            var record = JsonSerializer.Deserialize<AccessRecord>(File.ReadAllText(path, Encoding.UTF8))
                 ?? throw new InvalidDataException("The access configuration is empty.");
+            if (string.IsNullOrEmpty(record.Salt) || string.IsNullOrEmpty(record.Hash))
+                throw new InvalidDataException("The access configuration contains invalid passcode parameters.");
+            var salt = Convert.FromBase64String(record.Salt);
+            var hash = Convert.FromBase64String(record.Hash);
+            if (salt.Length != 16 || hash.Length != 32 || record.Iterations != Iterations)
+                throw new InvalidDataException("The access configuration contains invalid passcode parameters.");
+            if (string.IsNullOrEmpty(record.SessionVersion) || record.SessionVersion.Length != 64 || Convert.FromHexString(record.SessionVersion).Length != 32)
+                throw new InvalidDataException("The access configuration contains an invalid session version.");
+            return record;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException or FormatException)
         {
             throw new InvalidOperationException($"Could not read access configuration: {path}", ex);
         }
