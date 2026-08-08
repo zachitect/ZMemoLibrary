@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -5,12 +6,23 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 var settingsStore = new SettingsStore(builder.Environment.ContentRootPath);
 builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(settingsStore.Port));
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedHost |
+        ForwardedHeaders.XForwardedProto;
+    options.KnownProxies.Add(IPAddress.Loopback);
+    options.KnownProxies.Add(IPAddress.IPv6Loopback);
+});
 
 builder.Services.AddSingleton(settingsStore);
 builder.Services.AddSingleton<KnowledgeLibrary>();
@@ -67,6 +79,20 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["Content-Security-Policy"] =
+            "frame-ancestors 'self' https://zachitect.github.io";
+        context.Response.Headers.Remove("X-Frame-Options");
+        return Task.CompletedTask;
+    });
+
+    return next();
+});
 var library = app.Services.GetRequiredService<KnowledgeLibrary>();
 if (settingsStore.IsConfigured)
     library.Rescan();
