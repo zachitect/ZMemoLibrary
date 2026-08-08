@@ -81,18 +81,20 @@ builder.Services.AddRateLimiter(options =>
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+
 app.Use(async (context, next) =>
 {
     context.Response.OnStarting(() =>
     {
-        context.Response.Headers["Content-Security-Policy"] =
-            "frame-ancestors 'self' https://zachitect.github.io";
+        context.Response.Headers.ContentSecurityPolicy =
+            "frame-ancestors 'self' https://zachitect.github.io;";
         context.Response.Headers.Remove("X-Frame-Options");
         return Task.CompletedTask;
     });
 
-    return next();
+    await next();
 });
+
 var library = app.Services.GetRequiredService<KnowledgeLibrary>();
 if (settingsStore.IsConfigured)
     library.Rescan();
